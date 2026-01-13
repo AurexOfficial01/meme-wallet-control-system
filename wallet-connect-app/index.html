@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Meta tags for Aviiaor Demo Platform -->
+    <title>Aviiaor - Educational Web3 Gaming Demo</title>
+    <meta name="description" content="Educational demo platform for web3 gaming concepts. No real money involved." />
+    <meta name="keywords" content="web3, gaming, demo, educational, blockchain, crypto, ethereum" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Aviiaor - Educational Web3 Gaming Demo" />
+    <meta property="og:description" content="Learn web3 gaming concepts in a safe, demo-only environment. No real money involved." />
+    <meta property="og:image" content="https://aviiator.demo/og-image.png" />
+    
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Aviiaor - Educational Web3 Gaming Demo" />
+    <meta name="twitter:description" content="Learn web3 gaming concepts in a safe, demo-only environment. No real money involved." />
+    <meta name="twitter:image" content="https://aviiator.demo/twitter-image.png" />
+    
+    <!-- PWA -->
+    <meta name="theme-color" content="#3b82f6" />
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    
+    <!-- Security headers (CSP would be added by server) -->
+  </head>
+  <body>
+    <!-- Root container for React -->
+    <div id="root"></div>
+    
+    <!-- No scripts here - Vite injects them -->
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Demo warning -->
+    <noscript>
+      <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #1f2937; color: white; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center; z-index: 9999;">
+        <div>
+          <h1 style="font-size: 2rem; margin-bottom: 1rem; color: #ef4444;">JavaScript Required</h1>
+          <p style="font-size: 1.2rem; margin-bottom: 1.5rem; max-width: 600px;">
+            Aviiaor Demo Platform requires JavaScript to run. Please enable JavaScript in your browser to continue.
+          </p>
+          <p style="color: #9ca3af; font-size: 0.9rem;">
+            This is an educational demo platform. No real money is involved.
+          </p>
+        </div>
+      </div>
+    </noscript>
+  </body>
+</html>
