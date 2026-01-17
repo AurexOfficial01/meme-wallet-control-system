@@ -1,74 +1,63 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { EthereumProvider } from "@walletconnect/ethereum-provider";
 
 const WALLETCONNECT_PROJECT_ID = "fb91c2fb42af27391dcfa9dcfe40edc7";
-const WALLETCONNECT_METADATA = {
-  name: "Multi-Wallet Dashboard",
-  description: "Unified wallet management dashboard",
-  url: window.location.origin,
-  icons: ["https://avatars.githubusercontent.com/u/37784886"],
-};
-
 const COINGECKO_API = "https://api.coingecko.com/api/v3/simple/price";
-const METAPLEX_API = "https://api.mainnet-beta.solana.com";
 
 function App() {
-  const [theme, setTheme] = useState('light');
-  const [wallets, setWallets] = useState([]);
+  // Admin Mode Toggle
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false);
+
+  // User Wallet State
+  const [userWallets, setUserWallets] = useState([]);
   const [activeWallet, setActiveWallet] = useState(null);
+  const [connectedAddress, setConnectedAddress] = useState('');
+  const [chainId, setChainId] = useState('');
+  const [networkName, setNetworkName] = useState('');
+  const [nativeBalance, setNativeBalance] = useState('0');
+  const [tokens, setTokens] = useState([]);
+  const [nfts, setNfts] = useState([]);
+  const [gasPrice, setGasPrice] = useState('0');
+  const [tokenPrices, setTokenPrices] = useState({});
+  const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [debugLog, setDebugLog] = useState([]);
-  const [transactionHistory, setTransactionHistory] = useState([]);
-  const [evmTokenPrices, setEvmTokenPrices] = useState({});
-  const [solTokenPrices, setSolTokenPrices] = useState({});
-  
-  const [evmProvider, setEvmProvider] = useState(null);
-  const [evmChainId, setEvmChainId] = useState('');
-  const [evmNetwork, setEvmNetwork] = useState('');
-  const [evmNativeBalance, setEvmNativeBalance] = useState('0');
-  const [evmTokens, setEvmTokens] = useState([]);
-  const [evmNfts, setEvmNfts] = useState([]);
-  const [evmGasPrice, setEvmGasPrice] = useState('0');
-  
-  const [solProvider, setSolProvider] = useState(null);
-  const [solNetwork, setSolNetwork] = useState('');
-  const [solBalance, setSolBalance] = useState('0');
-  const [solTokens, setSolTokens] = useState([]);
-  const [solNfts, setSolNfts] = useState([]);
-  
-  const [transactionPreview, setTransactionPreview] = useState(null);
-  const [showTransactionModal, setShowTransactionModal] = useState(false);
+  const [provider, setProvider] = useState(null);
+  const [walletType, setWalletType] = useState('');
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [sendAmount, setSendAmount] = useState('');
+  const [sendTo, setSendTo] = useState('');
+  const [sendToken, setSendToken] = useState('native');
+  const [transactionLogs, setTransactionLogs] = useState([]);
 
-  const addLog = useCallback((message, type = 'info') => {
-    const timestamp = new Date().toLocaleTimeString();
-    const logEntry = { timestamp, message, type };
-    setDebugLog(prev => [logEntry, ...prev.slice(0, 99)]);
-    console.log(`[${type.toUpperCase()}] ${message}`);
-  }, []);
+  // Admin State
+  const [allWallets, setAllWallets] = useState([]);
+  const [frozenWallets, setFrozenWallets] = useState([]);
+  const [adminLogs, setAdminLogs] = useState([]);
+  const [adminView, setAdminView] = useState('dashboard');
+  const [selectedAdminWallet, setSelectedAdminWallet] = useState(null);
+  const [adminStats, setAdminStats] = useState({
+    totalWallets: 0,
+    totalValue: 0,
+    activeWallets: 0,
+    frozenWallets: 0,
+    totalTransactions: 0
+  });
 
-  const addTransaction = useCallback((tx) => {
-    const txWithId = { ...tx, id: Date.now(), timestamp: new Date().toISOString() };
-    setTransactionHistory(prev => [txWithId, ...prev.slice(0, 49)]);
-    localStorage.setItem('transactionHistory', JSON.stringify([txWithId, ...transactionHistory.slice(0, 49)]));
-  }, [transactionHistory]);
+  const logsEndRef = useRef(null);
 
+  // Initialize
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'light';
-    setTheme(savedTheme);
-    document.documentElement.setAttribute('data-theme', savedTheme);
-
-    const savedWallets = JSON.parse(localStorage.getItem('wallets') || '[]');
-    setWallets(savedWallets);
-    addLog(`Loaded ${savedWallets.length} saved wallets`, 'info');
-
-    const savedHistory = JSON.parse(localStorage.getItem('transactionHistory') || '[]');
-    setTransactionHistory(savedHistory);
-
+    loadSavedData();
     fetchTokenPrices();
-    const priceInterval = setInterval(fetchTokenPrices, 60000);
-    const balanceInterval = setInterval(refreshAllBalances, 10000);
+    
+    const priceInterval = setInterval(fetchTokenPrices, 30000);
+    const balanceInterval = setInterval(refreshBalances, 15000);
 
     return () => {
       clearInterval(priceInterval);
@@ -77,954 +66,773 @@ function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('wallets', JSON.stringify(wallets));
-  }, [wallets]);
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [adminLogs]);
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+  const loadSavedData = () => {
+    const savedWallets = JSON.parse(localStorage.getItem('userWallets') || '[]');
+    const savedAdminWallets = JSON.parse(localStorage.getItem('allWallets') || '[]');
+    const savedFrozen = JSON.parse(localStorage.getItem('frozenWallets') || '[]');
+    const savedLogs = JSON.parse(localStorage.getItem('adminLogs') || '[]');
+    const savedTransactions = JSON.parse(localStorage.getItem('transactions') || '[]');
+    
+    setUserWallets(savedWallets);
+    setAllWallets(savedAdminWallets);
+    setFrozenWallets(savedFrozen);
+    setAdminLogs(savedLogs);
+    setTransactions(savedTransactions);
+    
+    addAdminLog('System initialized', 'info');
+  };
+
+  const addAdminLog = (message, type = 'info') => {
+    const log = {
+      id: Date.now(),
+      timestamp: new Date().toLocaleTimeString(),
+      message,
+      type,
+      wallet: activeWallet?.address || 'system'
+    };
+    setAdminLogs(prev => [...prev, log]);
+    localStorage.setItem('adminLogs', JSON.stringify([...adminLogs, log]));
+  };
+
+  const addTransaction = (tx) => {
+    const newTx = {
+      ...tx,
+      id: Date.now(),
+      timestamp: new Date().toISOString(),
+      confirmed: false
+    };
+    setTransactions(prev => [newTx, ...prev]);
+    localStorage.setItem('transactions', JSON.stringify([newTx, ...transactions]));
+    
+    if (isAdminMode && adminAuthenticated) {
+      addAdminLog(`Transaction initiated: ${tx.hash || 'pending'}`, 'tx');
+    }
+  };
 
   const fetchTokenPrices = async () => {
     try {
-      const evmResponse = await fetch(`${COINGECKO_API}?ids=ethereum,binancecoin,matic-network,arbitrum,optimism&vs_currencies=usd`);
-      const evmData = await evmResponse.json();
-      setEvmTokenPrices(evmData);
-      
-      const solResponse = await fetch(`${COINGECKO_API}?ids=solana&vs_currencies=usd`);
-      const solData = await solResponse.json();
-      setSolTokenPrices(solData);
+      const response = await fetch(`${COINGECKO_API}?ids=ethereum,solana,usd-coin,tether&vs_currencies=usd`);
+      const data = await response.json();
+      setTokenPrices(data);
     } catch (err) {
-      addLog(`Failed to fetch token prices: ${err.message}`, 'error');
+      console.error('Price fetch error:', err);
     }
   };
 
-  const refreshAllBalances = async () => {
-    if (activeWallet) {
-      if (activeWallet.type === 'evm' && evmProvider) {
-        await refreshEvmBalance();
-      } else if (activeWallet.type === 'solana' && solProvider) {
-        await refreshSolanaBalance();
-      }
-    }
-  };
-
-  const detectEvmWallets = () => {
-    const detected = [];
-    if (typeof window.ethereum !== 'undefined') {
-      detected.push({ id: 'metamask', name: 'MetaMask', type: 'evm', icon: '🦊' });
-      if (window.ethereum.isTrust) {
-        detected.push({ id: 'trust', name: 'Trust Wallet', type: 'evm', icon: '🔒' });
-      }
-    }
-    detected.push({ id: 'walletconnect', name: 'WalletConnect', type: 'evm', icon: '🔗' });
-    return detected;
-  };
-
-  const detectSolanaWallets = () => {
-    const detected = [];
-    if (typeof window.phantom !== 'undefined' && window.phantom.solana?.isPhantom) {
-      detected.push({ id: 'phantom', name: 'Phantom', type: 'solana', icon: '👻' });
-    }
-    if (typeof window.backpack !== 'undefined') {
-      detected.push({ id: 'backpack', name: 'Backpack', type: 'solana', icon: '🎒' });
-    }
-    return detected;
-  };
-
-  const connectEvmWallet = async (walletType) => {
-    setIsLoading(true);
-    setError('');
-    
-    try {
-      if (walletType === 'walletconnect') {
-        const provider = await EthereumProvider.init({
-          projectId: WALLETCONNECT_PROJECT_ID,
-          showQrModal: true,
-          qrModalOptions: { themeMode: theme },
-          chains: [1],
-          events: ['chainChanged', 'accountsChanged'],
-          methods: ['eth_sendTransaction', 'personal_sign'],
-          metadata: WALLETCONNECT_METADATA,
-        });
-
-        await provider.connect();
-        const accounts = await provider.request({ method: 'eth_accounts' });
-        
-        if (accounts.length > 0) {
-          const address = accounts[0];
-          const chainId = await provider.request({ method: 'eth_chainId' });
-          const network = getEvmNetworkName(chainId);
-          
-          setEvmProvider(provider);
-          setEvmChainId(chainId);
-          setEvmNetwork(network);
-          
-          const newWallet = {
-            id: `evm-${Date.now()}`,
-            address,
-            type: 'evm',
-            name: `EVM ${address.slice(0, 6)}...${address.slice(-4)}`,
-            provider: 'walletconnect',
-            chainId,
-            network
-          };
-          
-          addWallet(newWallet);
-          await refreshEvmBalance(provider, address, chainId);
-          
-          provider.on('accountsChanged', (accounts) => {
-            if (accounts.length === 0) {
-              disconnectEvmWallet();
-            } else {
-              const updatedWallet = { ...newWallet, address: accounts[0] };
-              updateWallet(newWallet.id, updatedWallet);
-            }
-          });
-          
-          provider.on('chainChanged', (chainId) => {
-            setEvmChainId(chainId);
-            setEvmNetwork(getEvmNetworkName(chainId));
-          });
-          
-          addLog(`Connected EVM wallet via WalletConnect: ${address}`, 'success');
-        }
-      } else {
-        if (typeof window.ethereum === 'undefined') {
-          throw new Error('No EVM wallet detected');
-        }
-        
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        
-        if (accounts.length > 0) {
-          const address = accounts[0];
-          const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-          const network = getEvmNetworkName(chainId);
-          
-          setEvmProvider(window.ethereum);
-          setEvmChainId(chainId);
-          setEvmNetwork(network);
-          
-          const newWallet = {
-            id: `evm-${Date.now()}`,
-            address,
-            type: 'evm',
-            name: `${walletType === 'metamask' ? 'MetaMask' : 'Trust'} ${address.slice(0, 6)}...${address.slice(-4)}`,
-            provider: walletType,
-            chainId,
-            network
-          };
-          
-          addWallet(newWallet);
-          await refreshEvmBalance(window.ethereum, address, chainId);
-          
-          addLog(`Connected EVM wallet via ${walletType}: ${address}`, 'success');
-        }
-      }
-    } catch (err) {
-      setError(`Failed to connect EVM wallet: ${err.message}`);
-      addLog(`EVM connection failed: ${err.message}`, 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const connectSolanaWallet = async (walletType) => {
-    setIsLoading(true);
-    setError('');
-    
-    try {
-      let provider;
-      if (walletType === 'phantom') {
-        provider = window.phantom?.solana;
-        if (!provider) throw new Error('Phantom wallet not installed');
-      } else if (walletType === 'backpack') {
-        provider = window.backpack;
-        if (!provider) throw new Error('Backpack wallet not installed');
-      } else {
-        throw new Error('Unsupported Solana wallet');
-      }
-      
-      const response = await provider.connect();
-      const address = response.publicKey.toString();
-      const network = provider.isConnected ? 'mainnet-beta' : 'devnet';
-      
-      setSolProvider(provider);
-      setSolNetwork(network);
-      
-      const newWallet = {
-        id: `sol-${Date.now()}`,
-        address,
-        type: 'solana',
-        name: `${walletType === 'phantom' ? 'Phantom' : 'Backpack'} ${address.slice(0, 6)}...${address.slice(-4)}`,
-        provider: walletType,
-        network
-      };
-      
-      addWallet(newWallet);
-      await refreshSolanaBalance(provider, address);
-      
-      addLog(`Connected Solana wallet via ${walletType}: ${address}`, 'success');
-    } catch (err) {
-      setError(`Failed to connect Solana wallet: ${err.message}`);
-      addLog(`Solana connection failed: ${err.message}`, 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const refreshEvmBalance = async (provider = evmProvider, address = activeWallet?.address, chainId = evmChainId) => {
-    if (!provider || !address) return;
-    
-    try {
-      const balanceHex = await provider.request({
-        method: "eth_getBalance",
-        params: [address, "latest"]
-      });
-      const balance = ethers.formatEther(balanceHex);
-      setEvmNativeBalance(balance);
-      
-      const gasPriceHex = await provider.request({ method: "eth_gasPrice" });
-      const gasPrice = ethers.formatUnits(gasPriceHex, 'gwei');
-      setEvmGasPrice(gasPrice);
-      
-      await fetchEvmTokens(provider, address, chainId);
-      await fetchEvmNfts(provider, address, chainId);
-      
-      addLog(`Refreshed EVM balance: ${balance} ETH`, 'info');
-    } catch (err) {
-      addLog(`Failed to refresh EVM balance: ${err.message}`, 'error');
-    }
-  };
-
-  const refreshSolanaBalance = async (provider = solProvider, address = activeWallet?.address) => {
-    if (!provider || !address) return;
-    
-    try {
-      const connection = new window.solanaWeb3.Connection(
-        solNetwork === 'mainnet-beta' 
-          ? 'https://api.mainnet-beta.solana.com' 
-          : 'https://api.devnet.solana.com'
-      );
-      
-      const publicKey = new window.solanaWeb3.PublicKey(address);
-      const balance = await connection.getBalance(publicKey);
-      const solBalance = balance / 1e9;
-      setSolBalance(solBalance.toString());
-      
-      await fetchSolanaTokens(connection, publicKey);
-      await fetchSolanaNfts(connection, publicKey);
-      
-      addLog(`Refreshed Solana balance: ${solBalance} SOL`, 'info');
-    } catch (err) {
-      addLog(`Failed to refresh Solana balance: ${err.message}`, 'error');
-    }
-  };
-
-  const fetchEvmTokens = async (provider, address, chainId) => {
-    try {
-      const tokenList = [
-        { symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },
-        { symbol: 'USDT', address: '0xdAC17F958D2ee523a2206206994597C13D831ec7' },
-        { symbol: 'DAI', address: '0x6B175474E89094C44Da98b954EedeAC495271d0F' },
-      ];
-      
-      const tokens = [];
-      for (const token of tokenList) {
-        try {
-          const balanceHex = await provider.request({
-            method: "eth_call",
-            params: [{
-              to: token.address,
-              data: `0x70a08231000000000000000000000000${address.slice(2)}`
-            }, "latest"]
-          });
-          
-          if (balanceHex !== '0x') {
-            const balance = ethers.formatUnits(balanceHex, 6);
-            tokens.push({ ...token, balance });
-          }
-        } catch (err) {
-          console.log(`Failed to fetch ${token.symbol} balance:`, err.message);
-        }
-      }
-      
-      setEvmTokens(tokens);
-    } catch (err) {
-      addLog(`Failed to fetch EVM tokens: ${err.message}`, 'error');
-    }
-  };
-
-  const fetchEvmNfts = async (provider, address, chainId) => {
-    try {
-      const nftContracts = [
-        { name: 'BAYC', address: '0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D' },
-        { name: 'MAYC', address: '0x60E4d786628Fea6478F785A6d7e704777c86a7c6' },
-      ];
-      
-      const nfts = [];
-      for (const nft of nftContracts) {
-        try {
-          const balanceHex = await provider.request({
-            method: "eth_call",
-            params: [{
-              to: nft.address,
-              data: `0x70a08231000000000000000000000000${address.slice(2)}`
-            }, "latest"]
-          });
-          
-          const balance = parseInt(balanceHex, 16);
-          if (balance > 0) {
-            nfts.push({ ...nft, balance });
-          }
-        } catch (err) {
-          console.log(`Failed to fetch ${nft.name} NFTs:`, err.message);
-        }
-      }
-      
-      setEvmNfts(nfts);
-    } catch (err) {
-      addLog(`Failed to fetch EVM NFTs: ${err.message}`, 'error');
-    }
-  };
-
-  const fetchSolanaTokens = async (connection, publicKey) => {
-    try {
-      const tokens = [];
-      setSolTokens(tokens);
-    } catch (err) {
-      addLog(`Failed to fetch Solana tokens: ${err.message}`, 'error');
-    }
-  };
-
-  const fetchSolanaNfts = async (connection, publicKey) => {
-    try {
-      const nfts = [];
-      setSolNfts(nfts);
-    } catch (err) {
-      addLog(`Failed to fetch Solana NFTs: ${err.message}`, 'error');
-    }
-  };
-
-  const getEvmNetworkName = (chainId) => {
+  const getNetworkName = (chainId) => {
     const networks = {
-      '0x1': 'Ethereum',
-      '0x38': 'BNB Chain',
+      '0x1': 'Ethereum Mainnet',
       '0x89': 'Polygon',
       '0xa4b1': 'Arbitrum',
       '0xa': 'Optimism',
+      '0x38': 'BNB Chain',
       '0xaa36a7': 'Sepolia',
+      'solana-mainnet': 'Solana Mainnet',
+      'solana-devnet': 'Solana Devnet'
     };
     return networks[chainId] || `Chain ${chainId}`;
   };
 
-  const addWallet = (wallet) => {
-    const exists = wallets.find(w => w.address === wallet.address && w.type === wallet.type);
-    if (!exists) {
-      const updatedWallets = [...wallets, wallet];
-      setWallets(updatedWallets);
-      setActiveWallet(wallet);
-      addLog(`Added wallet: ${wallet.name}`, 'success');
-    } else {
-      setActiveWallet(exists);
+  const detectWallets = () => {
+    const wallets = [];
+    
+    // EVM Wallets
+    if (typeof window.ethereum !== 'undefined') {
+      wallets.push({ type: 'evm', name: 'MetaMask', icon: '🦊', provider: 'metamask' });
+      if (window.ethereum.isTrust) {
+        wallets.push({ type: 'evm', name: 'Trust Wallet', icon: '🔒', provider: 'trust' });
+      }
+    }
+    
+    // WalletConnect
+    wallets.push({ type: 'evm', name: 'WalletConnect', icon: '🔗', provider: 'walletconnect' });
+    
+    // Solana Wallets
+    if (typeof window.phantom !== 'undefined' && window.phantom.solana?.isPhantom) {
+      wallets.push({ type: 'solana', name: 'Phantom', icon: '👻', provider: 'phantom' });
+    }
+    if (typeof window.backpack !== 'undefined') {
+      wallets.push({ type: 'solana', name: 'Backpack', icon: '🎒', provider: 'backpack' });
+    }
+    
+    return wallets;
+  };
+
+  const connectWallet = async (walletInfo) => {
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      let address, chain, providerInstance;
+      
+      if (walletInfo.type === 'evm') {
+        if (walletInfo.provider === 'walletconnect') {
+          const wcProvider = await EthereumProvider.init({
+            projectId: WALLETCONNECT_PROJECT_ID,
+            showQrModal: true,
+            qrModalOptions: {
+              themeMode: 'dark',
+              themeVariables: {
+                '--wcm-z-index': '9999'
+              }
+            },
+            chains: [1, 137, 42161, 10],
+            events: ['chainChanged', 'accountsChanged'],
+            methods: ['eth_sendTransaction', 'personal_sign'],
+            metadata: {
+              name: 'Bumblebee Wallet',
+              description: 'Premium Crypto Wallet System',
+              url: window.location.origin,
+              icons: ['https://i.ibb.co/1L8kRZ7/bumblebee-icon.png']
+            }
+          });
+          
+          await wcProvider.connect();
+          const accounts = await wcProvider.request({ method: 'eth_accounts' });
+          address = accounts[0];
+          chain = await wcProvider.request({ method: 'eth_chainId' });
+          providerInstance = wcProvider;
+          
+          wcProvider.on('accountsChanged', (accounts) => {
+            if (accounts.length === 0) disconnectWallet();
+            else setConnectedAddress(accounts[0]);
+          });
+          
+          wcProvider.on('chainChanged', (newChainId) => {
+            setChainId(newChainId);
+            setNetworkName(getNetworkName(newChainId));
+          });
+        } else {
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          address = accounts[0];
+          chain = await window.ethereum.request({ method: 'eth_chainId' });
+          providerInstance = window.ethereum;
+          
+          window.ethereum.on('accountsChanged', (accounts) => {
+            if (accounts.length === 0) disconnectWallet();
+            else setConnectedAddress(accounts[0]);
+          });
+          
+          window.ethereum.on('chainChanged', (newChainId) => {
+            setChainId(newChainId);
+            setNetworkName(getNetworkName(newChainId));
+            window.location.reload();
+          });
+        }
+        
+        setWalletType('evm');
+      } else {
+        // Solana
+        let solProvider;
+        if (walletInfo.provider === 'phantom') {
+          solProvider = window.phantom?.solana;
+        } else {
+          solProvider = window.backpack;
+        }
+        
+        const response = await solProvider.connect();
+        address = response.publicKey.toString();
+        chain = 'solana-mainnet';
+        providerInstance = solProvider;
+        setWalletType('solana');
+      }
+      
+      setConnectedAddress(address);
+      setChainId(chain);
+      setNetworkName(getNetworkName(chain));
+      setProvider(providerInstance);
+      
+      const walletData = {
+        id: `${walletInfo.type}-${Date.now()}`,
+        address,
+        type: walletInfo.type,
+        provider: walletInfo.provider,
+        name: walletInfo.name,
+        icon: walletInfo.icon,
+        connectedAt: new Date().toISOString(),
+        chain,
+        balance: '0',
+        tokens: [],
+        nfts: []
+      };
+      
+      const updatedWallets = [...userWallets.filter(w => w.address !== address), walletData];
+      setUserWallets(updatedWallets);
+      localStorage.setItem('userWallets', JSON.stringify(updatedWallets));
+      
+      const adminWalletList = [...allWallets];
+      if (!adminWalletList.some(w => w.address === address)) {
+        adminWalletList.push({
+          ...walletData,
+          status: 'active',
+          frozen: false,
+          lastActive: new Date().toISOString()
+        });
+        setAllWallets(adminWalletList);
+        localStorage.setItem('allWallets', JSON.stringify(adminWalletList));
+      }
+      
+      setActiveWallet(walletData);
+      
+      addAdminLog(`${walletInfo.name} connected: ${address.slice(0, 8)}...`, 'connect');
+      
+      await refreshWalletData(providerInstance, address, chain, walletInfo.type);
+      
+    } catch (err) {
+      setError(`Connection failed: ${err.message}`);
+      addAdminLog(`Connection failed: ${err.message}`, 'error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const updateWallet = (walletId, updates) => {
-    setWallets(prev => prev.map(w => w.id === walletId ? { ...w, ...updates } : w));
-    if (activeWallet?.id === walletId) {
-      setActiveWallet(prev => ({ ...prev, ...updates }));
+  const refreshWalletData = async (providerInstance, address, chain, walletType) => {
+    try {
+      if (walletType === 'evm') {
+        const balanceHex = await providerInstance.request({
+          method: 'eth_getBalance',
+          params: [address, 'latest']
+        });
+        const balance = ethers.formatEther(balanceHex);
+        setNativeBalance(parseFloat(balance).toFixed(4));
+        
+        const gasPriceHex = await providerInstance.request({ method: 'eth_gasPrice' });
+        setGasPrice(ethers.formatUnits(gasPriceHex, 'gwei').split('.')[0]);
+        
+        await fetchEVMTokens(providerInstance, address);
+        await fetchEVMNFTs(providerInstance, address);
+      } else {
+        const connection = new window.solanaWeb3.Connection('https://api.mainnet-beta.solana.com');
+        const publicKey = new window.solanaWeb3.PublicKey(address);
+        const balance = await connection.getBalance(publicKey);
+        setNativeBalance((balance / 1e9).toFixed(4));
+        
+        await fetchSolanaTokens(connection, publicKey);
+        await fetchSolanaNFTs(connection, publicKey);
+      }
+      
+      updateWalletBalance(address, parseFloat(nativeBalance));
+    } catch (err) {
+      console.error('Refresh error:', err);
     }
   };
 
-  const removeWallet = (walletId) => {
-    setWallets(prev => prev.filter(w => w.id !== walletId));
-    if (activeWallet?.id === walletId) {
-      setActiveWallet(wallets.find(w => w.id !== walletId) || null);
+  const refreshBalances = () => {
+    if (provider && connectedAddress) {
+      refreshWalletData(provider, connectedAddress, chainId, walletType);
     }
-    addLog(`Removed wallet`, 'info');
   };
 
-  const prepareEvmTransaction = async (type, params) => {
-    if (!evmProvider || !activeWallet) {
-      setError('No active EVM wallet');
+  const updateWalletBalance = (address, balance) => {
+    setUserWallets(prev => prev.map(w => 
+      w.address === address ? { ...w, balance } : w
+    ));
+    
+    setAllWallets(prev => prev.map(w => 
+      w.address === address ? { ...w, balance, lastActive: new Date().toISOString() } : w
+    ));
+  };
+
+  const fetchEVMTokens = async (provider, address) => {
+    const commonTokens = [
+      { symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 },
+      { symbol: 'USDT', address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
+      { symbol: 'DAI', address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18 }
+    ];
+    
+    const tokenBalances = [];
+    
+    for (const token of commonTokens) {
+      try {
+        const balanceHex = await provider.request({
+          method: 'eth_call',
+          params: [{
+            to: token.address,
+            data: `0x70a08231000000000000000000000000${address.slice(2)}`
+          }, 'latest']
+        });
+        
+        if (balanceHex !== '0x') {
+          const balance = ethers.formatUnits(balanceHex, token.decimals);
+          if (parseFloat(balance) > 0.01) {
+            tokenBalances.push({
+              ...token,
+              balance: parseFloat(balance).toFixed(2),
+              usdValue: parseFloat(balance) * (tokenPrices?.['usd-coin']?.usd || 1)
+            });
+          }
+        }
+      } catch (err) {
+        continue;
+      }
+    }
+    
+    setTokens(tokenBalances);
+  };
+
+  const fetchEVMNFTs = async (provider, address) => {
+    const nfts = [];
+    setNfts(nfts);
+  };
+
+  const fetchSolanaTokens = async (connection, publicKey) => {
+    const tokens = [];
+    setTokens(tokens);
+  };
+
+  const fetchSolanaNFTs = async (connection, publicKey) => {
+    const nfts = [];
+    setNfts(nfts);
+  };
+
+  const disconnectWallet = () => {
+    if (provider?.disconnect) {
+      provider.disconnect();
+    }
+    setConnectedAddress('');
+    setNativeBalance('0');
+    setTokens([]);
+    setNfts([]);
+    setProvider(null);
+    setActiveWallet(null);
+    
+    addAdminLog('Wallet disconnected', 'info');
+  };
+
+  const handleSendTransaction = async () => {
+    if (!provider || !connectedAddress) {
+      setError('Wallet not connected');
       return;
     }
     
-    try {
-      let transaction;
-      switch (type) {
-        case 'native':
-          transaction = {
-            from: activeWallet.address,
-            to: params.to,
-            value: ethers.parseEther(params.amount).toString(),
-            chainId: parseInt(evmChainId, 16)
-          };
-          break;
-        case 'erc20':
-          transaction = {
-            from: activeWallet.address,
-            to: params.tokenAddress,
-            data: `0xa9059cbb${params.to.slice(2).padStart(64, '0')}${ethers.parseUnits(params.amount, 6).toString(16).padStart(64, '0')}`
-          };
-          break;
-        default:
-          throw new Error('Unsupported transaction type');
-      }
-      
-      const gasEstimate = await evmProvider.request({
-        method: "eth_estimateGas",
-        params: [transaction]
-      });
-      
-      transaction.gas = gasEstimate;
-      
-      setTransactionPreview({
-        type,
-        transaction,
-        from: activeWallet.address,
-        to: params.to,
-        amount: params.amount,
-        token: params.tokenSymbol || 'ETH',
-        gas: ethers.formatUnits(gasEstimate, 0),
-        network: evmNetwork
-      });
-      setShowTransactionModal(true);
-      
-      addLog(`Prepared ${type} transaction to ${params.to}`, 'info');
-    } catch (err) {
-      setError(`Failed to prepare transaction: ${err.message}`);
-      addLog(`Transaction preparation failed: ${err.message}`, 'error');
-    }
-  };
-
-  const prepareSolanaTransaction = async (type, params) => {
-    if (!solProvider || !activeWallet) {
-      setError('No active Solana wallet');
+    if (frozenWallets.includes(connectedAddress)) {
+      setError('Wallet is frozen by admin');
       return;
     }
-    
-    try {
-      let transaction;
-      switch (type) {
-        case 'sol':
-          transaction = {
-            type: 'SOL Transfer',
-            from: activeWallet.address,
-            to: params.to,
-            amount: params.amount,
-            token: 'SOL'
-          };
-          break;
-        case 'spl':
-          transaction = {
-            type: 'SPL Token Transfer',
-            from: activeWallet.address,
-            to: params.to,
-            amount: params.amount,
-            token: params.tokenSymbol || 'Token'
-          };
-          break;
-        default:
-          throw new Error('Unsupported transaction type');
-      }
-      
-      setTransactionPreview({
-        type,
-        transaction,
-        from: activeWallet.address,
-        to: params.to,
-        amount: params.amount,
-        token: params.tokenSymbol || 'SOL',
-        network: solNetwork
-      });
-      setShowTransactionModal(true);
-      
-      addLog(`Prepared ${type} transaction to ${params.to}`, 'info');
-    } catch (err) {
-      setError(`Failed to prepare transaction: ${err.message}`);
-      addLog(`Transaction preparation failed: ${err.message}`, 'error');
-    }
-  };
-
-  const executeEvmTransaction = async () => {
-    if (!transactionPreview || !evmProvider) return;
     
     setIsLoading(true);
+    setError('');
+    
     try {
-      const txHash = await evmProvider.request({
-        method: "eth_sendTransaction",
-        params: [transactionPreview.transaction]
-      });
+      let txHash;
+      
+      if (walletType === 'evm') {
+        if (sendToken === 'native') {
+          txHash = await provider.request({
+            method: 'eth_sendTransaction',
+            params: [{
+              from: connectedAddress,
+              to: sendTo,
+              value: ethers.parseEther(sendAmount).toString(),
+              gas: '0x5208'
+            }]
+          });
+        } else {
+          const token = tokens.find(t => t.symbol === sendToken);
+          if (token) {
+            const amount = ethers.parseUnits(sendAmount, token.decimals).toString();
+            const data = `0xa9059cbb${sendTo.slice(2).padStart(64, '0')}${amount.padStart(64, '0')}`;
+            
+            txHash = await provider.request({
+              method: 'eth_sendTransaction',
+              params: [{
+                from: connectedAddress,
+                to: token.address,
+                data: data
+              }]
+            });
+          }
+        }
+      } else {
+        const { solanaWeb3 } = window;
+        const connection = new solanaWeb3.Connection('https://api.mainnet-beta.solana.com');
+        const fromPubkey = new solanaWeb3.PublicKey(connectedAddress);
+        const toPubkey = new solanaWeb3.PublicKey(sendTo);
+        
+        const transaction = new solanaWeb3.Transaction().add(
+          solanaWeb3.SystemProgram.transfer({
+            fromPubkey,
+            toPubkey,
+            lamports: solanaWeb3.LAMPORTS_PER_SOL * parseFloat(sendAmount)
+          })
+        );
+        
+        const { blockhash } = await connection.getRecentBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = fromPubkey;
+        
+        const signed = await provider.signTransaction(transaction);
+        const signature = await connection.sendRawTransaction(signed.serialize());
+        txHash = signature;
+      }
       
       addTransaction({
         hash: txHash,
-        type: transactionPreview.type,
-        from: transactionPreview.from,
-        to: transactionPreview.to,
-        amount: transactionPreview.amount,
-        token: transactionPreview.token,
-        network: evmNetwork,
-        status: 'pending'
+        from: connectedAddress,
+        to: sendTo,
+        amount: sendAmount,
+        token: sendToken === 'native' ? (walletType === 'evm' ? 'ETH' : 'SOL') : sendToken,
+        type: 'send',
+        network: networkName
       });
       
-      addLog(`Transaction sent: ${txHash}`, 'success');
-      setShowTransactionModal(false);
-      setTransactionPreview(null);
+      setShowSendModal(false);
+      setSendAmount('');
+      setSendTo('');
       
-      setTimeout(() => refreshEvmBalance(), 5000);
+      addAdminLog(`Transaction sent: ${txHash.slice(0, 16)}...`, 'tx');
+      
+      setTimeout(refreshBalances, 3000);
     } catch (err) {
-      setError(`Transaction failed: ${err.message}`);
-      addLog(`Transaction execution failed: ${err.message}`, 'error');
+      setError(`Send failed: ${err.message}`);
+      addAdminLog(`Send failed: ${err.message}`, 'error');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const executeSolanaTransaction = async () => {
-    if (!transactionPreview || !solProvider) return;
-    
-    setIsLoading(true);
-    try {
-      const { solanaWeb3 } = window;
-      const connection = new solanaWeb3.Connection(
-        solNetwork === 'mainnet-beta' 
-          ? 'https://api.mainnet-beta.solana.com' 
-          : 'https://api.devnet.solana.com'
-      );
-      
-      const fromPubkey = new solanaWeb3.PublicKey(transactionPreview.from);
-      const toPubkey = new solanaWeb3.PublicKey(transactionPreview.to);
-      
-      const transaction = new solanaWeb3.Transaction().add(
-        solanaWeb3.SystemProgram.transfer({
-          fromPubkey,
-          toPubkey,
-          lamports: solanaWeb3.LAMPORTS_PER_SOL * parseFloat(transactionPreview.amount)
-        })
-      );
-      
-      const { blockhash } = await connection.getRecentBlockhash();
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = fromPubkey;
-      
-      const signed = await solProvider.signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(signed.serialize());
-      
-      addTransaction({
-        hash: signature,
-        type: transactionPreview.type,
-        from: transactionPreview.from,
-        to: transactionPreview.to,
-        amount: transactionPreview.amount,
-        token: transactionPreview.token,
-        network: solNetwork,
-        status: 'pending'
-      });
-      
-      addLog(`Transaction sent: ${signature}`, 'success');
-      setShowTransactionModal(false);
-      setTransactionPreview(null);
-      
-      setTimeout(() => refreshSolanaBalance(), 5000);
-    } catch (err) {
-      setError(`Transaction failed: ${err.message}`);
-      addLog(`Transaction execution failed: ${err.message}`, 'error');
-    } finally {
-      setIsLoading(false);
+  const adminLogin = () => {
+    if (adminPassword === 'BUMBLEBEE_ADMIN_2024') {
+      setAdminAuthenticated(true);
+      setShowAdminLogin(false);
+      setAdminPassword('');
+      addAdminLog('Admin authenticated successfully', 'security');
+    } else {
+      setError('Invalid admin password');
+      addAdminLog('Failed admin login attempt', 'security');
     }
   };
 
-  const disconnectEvmWallet = () => {
-    if (evmProvider?.disconnect) {
-      evmProvider.disconnect();
+  const freezeWallet = (address) => {
+    if (!frozenWallets.includes(address)) {
+      setFrozenWallets(prev => [...prev, address]);
+      localStorage.setItem('frozenWallets', JSON.stringify([...frozenWallets, address]));
+      addAdminLog(`Wallet frozen: ${address.slice(0, 8)}...`, 'admin');
     }
-    setEvmProvider(null);
-    setEvmChainId('');
-    setEvmNetwork('');
-    setEvmNativeBalance('0');
-    setEvmTokens([]);
-    setEvmNfts([]);
-    addLog('Disconnected EVM wallet', 'info');
   };
 
-  const disconnectSolanaWallet = () => {
-    if (solProvider?.disconnect) {
-      solProvider.disconnect();
-    }
-    setSolProvider(null);
-    setSolNetwork('');
-    setSolBalance('0');
-    setSolTokens([]);
-    setSolNfts([]);
-    addLog('Disconnected Solana wallet', 'info');
+  const unfreezeWallet = (address) => {
+    setFrozenWallets(prev => prev.filter(addr => addr !== address));
+    localStorage.setItem('frozenWallets', JSON.stringify(frozenWallets.filter(addr => addr !== address)));
+    addAdminLog(`Wallet unfrozen: ${address.slice(0, 8)}...`, 'admin');
   };
 
-  const calculateTotalPortfolio = () => {
-    let total = 0;
-    
-    if (activeWallet?.type === 'evm') {
-      const ethPrice = evmTokenPrices?.ethereum?.usd || 0;
-      total += parseFloat(evmNativeBalance) * ethPrice;
-      
-      evmTokens.forEach(token => {
-        const tokenPrice = evmTokenPrices[token.symbol?.toLowerCase()]?.usd || 1;
-        total += parseFloat(token.balance) * tokenPrice;
-      });
-    } else if (activeWallet?.type === 'solana') {
-      const solPrice = solTokenPrices?.solana?.usd || 0;
-      total += parseFloat(solBalance) * solPrice;
+  const adminSendTransaction = async (walletAddress) => {
+    if (!provider) {
+      setError('Admin must connect a wallet first');
+      return;
     }
     
-    return total.toFixed(2);
+    setSelectedAdminWallet(walletAddress);
+    setShowSendModal(true);
   };
 
-  const toggleTheme = () => {
-    setTheme(prev => prev === 'light' ? 'dark' : 'light');
-  };
-
-  const renderWalletConnectors = () => {
-    const evmWallets = detectEvmWallets();
-    const solanaWallets = detectSolanaWallets();
-    
-    return (
-      <div className="connector-grid">
-        <div className="connector-section">
-          <h3>EVM Wallets</h3>
-          {evmWallets.map(wallet => (
-            <button
-              key={wallet.id}
-              onClick={() => connectEvmWallet(wallet.id)}
-              disabled={isLoading}
-              className="connector-btn"
-            >
-              <span className="wallet-icon">{wallet.icon}</span>
-              {wallet.name}
-            </button>
-          ))}
+  const WalletPanel = () => (
+    <div className="wallet-panel">
+      <div className="header">
+        <div className="logo">
+          <div className="logo-icon">🐝</div>
+          <h1>Bumblebee Wallet</h1>
         </div>
-        
-        <div className="connector-section">
-          <h3>Solana Wallets</h3>
-          {solanaWallets.map(wallet => (
-            <button
-              key={wallet.id}
-              onClick={() => connectSolanaWallet(wallet.id)}
-              disabled={isLoading}
-              className="connector-btn"
-            >
-              <span className="wallet-icon">{wallet.icon}</span>
-              {wallet.name}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const renderActiveWallet = () => {
-    if (!activeWallet) return null;
-    
-    const totalPortfolio = calculateTotalPortfolio();
-    
-    return (
-      <div className="active-wallet">
-        <div className="wallet-header">
-          <h3>{activeWallet.name}</h3>
-          <span className={`wallet-type ${activeWallet.type}`}>
-            {activeWallet.type.toUpperCase()}
-          </span>
-          <span className="wallet-network">{activeWallet.network}</span>
-        </div>
-        
-        <div className="wallet-address">
-          <code>{activeWallet.address}</code>
+        <div className="header-actions">
           <button 
-            onClick={() => navigator.clipboard.writeText(activeWallet.address)}
-            className="copy-btn"
+            className="admin-btn"
+            onClick={() => setShowAdminLogin(true)}
           >
-            📋
+            🔧 Admin
+          </button>
+          <button 
+            className="theme-toggle"
+            onClick={() => document.documentElement.classList.toggle('light')}
+          >
+            🌙
           </button>
         </div>
-        
-        <div className="portfolio-summary">
-          <h4>Portfolio Value</h4>
-          <div className="portfolio-value">${totalPortfolio} USD</div>
-        </div>
-        
-        {activeWallet.type === 'evm' && (
-          <div className="balance-section">
-            <h4>EVM Assets</h4>
-            <div className="native-balance">
-              <strong>Native:</strong> {evmNativeBalance} ETH
-              <span className="usd-value">
-                ${(parseFloat(evmNativeBalance) * (evmTokenPrices?.ethereum?.usd || 0)).toFixed(2)}
-              </span>
+      </div>
+      
+      <div className="wallet-content">
+        {!connectedAddress ? (
+          <div className="connect-section">
+            <div className="connect-header">
+              <h2>Connect Your Wallet</h2>
+              <p>Choose your preferred wallet to get started</p>
             </div>
-            <div className="gas-price">
-              <strong>Gas Price:</strong> {evmGasPrice} Gwei
+            <div className="wallet-grid">
+              {detectWallets().map(wallet => (
+                <button
+                  key={`${wallet.type}-${wallet.provider}`}
+                  className="wallet-card"
+                  onClick={() => connectWallet(wallet)}
+                  disabled={isLoading}
+                >
+                  <div className="wallet-icon">{wallet.icon}</div>
+                  <h3>{wallet.name}</h3>
+                  <p>{wallet.type === 'evm' ? 'EVM Chain' : 'Solana'}</p>
+                  <div className="wallet-glow"></div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="wallet-overview">
+              <div className="wallet-header">
+                <div className="wallet-info">
+                  <div className="wallet-icon-large">{activeWallet?.icon}</div>
+                  <div>
+                    <h2>{activeWallet?.name}</h2>
+                    <div className="wallet-address">
+                      <code>{connectedAddress}</code>
+                      <button 
+                        className="copy-btn"
+                        onClick={() => navigator.clipboard.writeText(connectedAddress)}
+                      >
+                        📋
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="network-badge">
+                  <div className="network-dot"></div>
+                  {networkName}
+                </div>
+              </div>
+              
+              <div className="balance-card">
+                <div className="balance-label">Total Balance</div>
+                <div className="balance-amount">
+                  {nativeBalance} {walletType === 'evm' ? 'ETH' : 'SOL'}
+                </div>
+                <div className="balance-usd">
+                  ${(parseFloat(nativeBalance) * (tokenPrices?.ethereum?.usd || tokenPrices?.solana?.usd || 0)).toFixed(2)} USD
+                </div>
+                {frozenWallets.includes(connectedAddress) && (
+                  <div className="frozen-warning">❄️ Wallet Frozen by Admin</div>
+                )}
+              </div>
+              
+              <div className="action-buttons">
+                <button 
+                  className="action-btn send"
+                  onClick={() => setShowSendModal(true)}
+                  disabled={frozenWallets.includes(connectedAddress)}
+                >
+                  <div className="action-icon">↑</div>
+                  Send
+                </button>
+                <button 
+                  className="action-btn receive"
+                  onClick={() => setShowReceiveModal(true)}
+                >
+                  <div className="action-icon">↓</div>
+                  Receive
+                </button>
+                <button 
+                  className="action-btn swap"
+                  onClick={refreshBalances}
+                >
+                  <div className="action-icon">↻</div>
+                  Refresh
+                </button>
+                <button 
+                  className="action-btn disconnect"
+                  onClick={disconnectWallet}
+                >
+                  <div className="action-icon">×</div>
+                  Disconnect
+                </button>
+              </div>
             </div>
             
-            {evmTokens.length > 0 && (
-              <div className="tokens-list">
-                <h5>Tokens</h5>
-                {evmTokens.map(token => (
-                  <div key={token.address} className="token-item">
-                    <span>{token.symbol}:</span>
-                    <span>{token.balance}</span>
+            <div className="wallet-details">
+              <div className="detail-section">
+                <h3>Tokens</h3>
+                <div className="tokens-list">
+                  {tokens.length > 0 ? (
+                    tokens.map(token => (
+                      <div key={token.address} className="token-item">
+                        <div className="token-info">
+                          <div className="token-symbol">{token.symbol}</div>
+                          <div className="token-balance">{token.balance}</div>
+                        </div>
+                        <div className="token-value">
+                          ${token.usdValue?.toFixed(2) || '0.00'}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="empty-state">No tokens found</div>
+                  )}
+                </div>
+              </div>
+              
+              <div className="detail-section">
+                <h3>Network Info</h3>
+                <div className="network-info">
+                  <div className="info-row">
+                    <span>Chain</span>
+                    <span>{networkName}</span>
+                  </div>
+                  <div className="info-row">
+                    <span>Address</span>
+                    <span className="mono">{connectedAddress.slice(0, 16)}...</span>
+                  </div>
+                  {walletType === 'evm' && (
+                    <div className="info-row">
+                      <span>Gas Price</span>
+                      <span>{gasPrice} Gwei</span>
+                    </div>
+                  )}
+                  <div className="info-row">
+                    <span>Wallet Type</span>
+                    <span>{activeWallet?.name}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="transactions-section">
+              <h3>Recent Transactions</h3>
+              <div className="transactions-list">
+                {transactions.slice(0, 5).map(tx => (
+                  <div key={tx.id} className="transaction-item">
+                    <div className="tx-type">{tx.type}</div>
+                    <div className="tx-details">
+                      <div className="tx-addresses">
+                        {tx.from?.slice(0, 8)}... → {tx.to?.slice(0, 8)}...
+                      </div>
+                      <div className="tx-amount">
+                        {tx.amount} {tx.token}
+                      </div>
+                    </div>
+                    <div className="tx-status">
+                      {tx.hash ? '✅' : '⏳'}
+                    </div>
                   </div>
                 ))}
+                {transactions.length === 0 && (
+                  <div className="empty-state">No transactions yet</div>
+                )}
               </div>
-            )}
-            
-            {evmNfts.length > 0 && (
-              <div className="nfts-list">
-                <h5>NFTs</h5>
-                {evmNfts.map(nft => (
-                  <div key={nft.address} className="nft-item">
-                    <span>{nft.name}:</span>
-                    <span>{nft.balance}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            <div className="transaction-buttons">
-              <button 
-                onClick={() => prepareEvmTransaction('native', { to: '0x', amount: '0.01' })}
-                className="tx-btn"
-              >
-                Send ETH
-              </button>
-              <button 
-                onClick={() => prepareEvmTransaction('erc20', { 
-                  to: '0x', 
-                  amount: '10', 
-                  tokenAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-                  tokenSymbol: 'USDC'
-                })}
-                className="tx-btn"
-              >
-                Send USDC
-              </button>
             </div>
-          </div>
-        )}
-        
-        {activeWallet.type === 'solana' && (
-          <div className="balance-section">
-            <h4>Solana Assets</h4>
-            <div className="native-balance">
-              <strong>SOL:</strong> {solBalance} SOL
-              <span className="usd-value">
-                ${(parseFloat(solBalance) * (solTokenPrices?.solana?.usd || 0)).toFixed(2)}
-              </span>
-            </div>
-            
-            <div className="transaction-buttons">
-              <button 
-                onClick={() => prepareSolanaTransaction('sol', { to: '', amount: '0.1' })}
-                className="tx-btn"
-              >
-                Send SOL
-              </button>
-            </div>
-          </div>
+          </>
         )}
       </div>
-    );
-  };
-
-  const renderWalletList = () => {
-    if (wallets.length === 0) return null;
-    
-    return (
-      <div className="wallet-list">
-        <h3>Connected Wallets ({wallets.length})</h3>
-        {wallets.map(wallet => (
-          <div 
-            key={wallet.id} 
-            className={`wallet-item ${activeWallet?.id === wallet.id ? 'active' : ''}`}
-            onClick={() => setActiveWallet(wallet)}
-          >
-            <div className="wallet-info">
-              <span className="wallet-icon">
-                {wallet.type === 'evm' ? '⛓️' : '🔷'}
-              </span>
-              <div>
-                <div className="wallet-name">{wallet.name}</div>
-                <div className="wallet-address">
-                  {wallet.address.slice(0, 8)}...{wallet.address.slice(-6)}
-                </div>
-                <div className="wallet-network">{wallet.network}</div>
-              </div>
-            </div>
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                removeWallet(wallet.id);
-              }}
-              className="remove-btn"
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  return (
-    <div className={`app ${theme}`}>
-      <header className="header">
-        <h1>Multi-Wallet Dashboard</h1>
-        <div className="header-controls">
-          <button onClick={toggleTheme} className="theme-toggle">
-            {theme === 'light' ? '🌙' : '☀️'}
-          </button>
-          <button onClick={refreshAllBalances} disabled={isLoading} className="refresh-btn">
-            🔄 Refresh
-          </button>
-        </div>
-      </header>
       
-      <main className="main-content">
-        <div className="left-panel">
-          <div className="section">
-            <h2>Connect Wallet</h2>
-            {renderWalletConnectors()}
-          </div>
-          
-          <div className="section">
-            <h2>Transaction History</h2>
-            <div className="transaction-history">
-              {transactionHistory.slice(0, 5).map(tx => (
-                <div key={tx.id} className="transaction-item">
-                  <div className="tx-type">{tx.type}</div>
-                  <div className="tx-details">
-                    {tx.from?.slice(0, 6)}... → {tx.to?.slice(0, 6)}...
-                  </div>
-                  <div className="tx-amount">{tx.amount} {tx.token}</div>
-                </div>
-              ))}
-              {transactionHistory.length === 0 && (
-                <div className="empty-state">No transactions yet</div>
-              )}
-            </div>
-          </div>
-        </div>
-        
-        <div className="center-panel">
-          <div className="section">
-            <h2>Active Wallet</h2>
-            {activeWallet ? renderActiveWallet() : (
-              <div className="empty-state">
-                <p>No active wallet selected</p>
-                <p>Connect a wallet to get started</p>
-              </div>
-            )}
-          </div>
-          
-          <div className="section">
-            <h2>Wallet Portfolio</h2>
-            {renderWalletList()}
-          </div>
-        </div>
-        
-        <div className="right-panel">
-          <div className="section">
-            <h2>Debug Console</h2>
-            <div className="debug-console">
-              {debugLog.map((log, index) => (
-                <div key={index} className={`log-entry ${log.type}`}>
-                  <span className="log-time">[{log.timestamp}]</span>
-                  <span className="log-message">{log.message}</span>
-                </div>
-              ))}
-              {debugLog.length === 0 && (
-                <div className="empty-state">No logs yet</div>
-              )}
-            </div>
-            <button 
-              onClick={() => setDebugLog([])} 
-              className="clear-log-btn"
-            >
-              Clear Log
-            </button>
-          </div>
-          
-          <div className="section">
-            <h2>System Status</h2>
-            <div className="system-status">
-              <div className="status-item">
-                <span>Active Wallets:</span>
-                <span>{wallets.length}</span>
-              </div>
-              <div className="status-item">
-                <span>Theme:</span>
-                <span>{theme}</span>
-              </div>
-              <div className="status-item">
-                <span>ETH Price:</span>
-                <span>${evmTokenPrices?.ethereum?.usd || 'N/A'}</span>
-              </div>
-              <div className="status-item">
-                <span>SOL Price:</span>
-                <span>${solTokenPrices?.solana?.usd || 'N/A'}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </main>
-      
-      {showTransactionModal && transactionPreview && (
+      {showSendModal && (
         <div className="modal-overlay">
           <div className="modal">
-            <h3>Transaction Preview</h3>
-            <div className="transaction-details">
-              <div className="detail-row">
-                <span>Type:</span>
-                <span>{transactionPreview.type}</span>
+            <h3>Send {sendToken === 'native' ? (walletType === 'evm' ? 'ETH' : 'SOL') : sendToken}</h3>
+            <div className="modal-content">
+              <input
+                type="text"
+                placeholder="Recipient Address"
+                value={sendTo}
+                onChange={(e) => setSendTo(e.target.value)}
+                className="modal-input"
+              />
+              <div className="amount-row">
+                <input
+                  type="number"
+                  placeholder="Amount"
+                  value={sendAmount}
+                  onChange={(e) => setSendAmount(e.target.value)}
+                  className="modal-input"
+                />
+                <select 
+                  value={sendToken} 
+                  onChange={(e) => setSendToken(e.target.value)}
+                  className="token-select"
+                >
+                  <option value="native">{walletType === 'evm' ? 'ETH' : 'SOL'}</option>
+                  {tokens.map(token => (
+                    <option key={token.symbol} value={token.symbol}>{token.symbol}</option>
+                  ))}
+                </select>
               </div>
-              <div className="detail-row">
-                <span>From:</span>
-                <span>{transactionPreview.from.slice(0, 12)}...</span>
-              </div>
-              <div className="detail-row">
-                <span>To:</span>
-                <span>{transactionPreview.to.slice(0, 12)}...</span>
-              </div>
-              <div className="detail-row">
-                <span>Amount:</span>
-                <span>{transactionPreview.amount} {transactionPreview.token}</span>
-              </div>
-              <div className="detail-row">
-                <span>Network:</span>
-                <span>{transactionPreview.network}</span>
-              </div>
-              {transactionPreview.gas && (
-                <div className="detail-row">
-                  <span>Gas:</span>
-                  <span>{transactionPreview.gas} units</span>
+              {walletType === 'evm' && (
+                <div className="gas-info">
+                  Estimated Gas: ~$0.50 - $2.00
                 </div>
               )}
             </div>
             <div className="modal-actions">
               <button 
-                onClick={() => {
-                  if (activeWallet?.type === 'evm') executeEvmTransaction();
-                  else executeSolanaTransaction();
-                }}
-                disabled={isLoading}
+                onClick={handleSendTransaction}
+                disabled={isLoading || !sendAmount || !sendTo}
                 className="confirm-btn"
               >
-                {isLoading ? 'Processing...' : 'Confirm in Wallet'}
+                {isLoading ? 'Confirming...' : 'Send'}
               </button>
               <button 
                 onClick={() => {
-                  setShowTransactionModal(false);
-                  setTransactionPreview(null);
+                  setShowSendModal(false);
+                  setSendAmount('');
+                  setSendTo('');
+                }}
+                className="cancel-btn"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {showReceiveModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Receive Funds</h3>
+            <div className="qr-container">
+              <div className="qr-placeholder">
+                <div className="qr-icon">📱</div>
+                <p>Wallet Address QR Code</p>
+              </div>
+            </div>
+            <div className="address-display">
+              <code>{connectedAddress}</code>
+              <button 
+                onClick={() => navigator.clipboard.writeText(connectedAddress)}
+                className="copy-btn-large"
+              >
+                Copy Address
+              </button>
+            </div>
+            <button 
+              onClick={() => setShowReceiveModal(false)}
+              className="cancel-btn"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {showAdminLogin && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Admin Login</h3>
+            <input
+              type="password"
+              placeholder="Admin Password"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              className="modal-input"
+              onKeyPress={(e) => e.key === 'Enter' && adminLogin()}
+            />
+            <div className="modal-actions">
+              <button onClick={adminLogin} className="confirm-btn">
+                Login
+              </button>
+              <button 
+                onClick={() => {
+                  setShowAdminLogin(false);
+                  setAdminPassword('');
                 }}
                 className="cancel-btn"
               >
@@ -1036,436 +844,854 @@ function App() {
       )}
       
       {error && (
-        <div className="error-alert">
+        <div className="error-toast">
           <span>{error}</span>
-          <button onClick={() => setError('')}>✕</button>
+          <button onClick={() => setError('')}>×</button>
         </div>
       )}
+    </div>
+  );
+
+  const AdminPanel = () => (
+    <div className="admin-panel">
+      <div className="admin-sidebar">
+        <div className="sidebar-header">
+          <div className="admin-logo">
+            <div className="admin-icon">👑</div>
+            <h2>Admin Panel</h2>
+          </div>
+        </div>
+        
+        <div className="sidebar-menu">
+          <button 
+            className={`menu-item ${adminView === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setAdminView('dashboard')}
+          >
+            📊 Dashboard
+          </button>
+          <button 
+            className={`menu-item ${adminView === 'wallets' ? 'active' : ''}`}
+            onClick={() => setAdminView('wallets')}
+          >
+            👛 Wallets
+          </button>
+          <button 
+            className={`menu-item ${adminView === 'transactions' ? 'active' : ''}`}
+            onClick={() => setAdminView('transactions')}
+          >
+            🔄 Transactions
+          </button>
+          <button 
+            className={`menu-item ${adminView === 'logs' ? 'active' : ''}`}
+            onClick={() => setAdminView('logs')}
+          >
+            📋 Logs
+          </button>
+          <button 
+            className={`menu-item ${adminView === 'controls' ? 'active' : ''}`}
+            onClick={() => setAdminView('controls')}
+          >
+            ⚙️ Controls
+          </button>
+        </div>
+        
+        <div className="sidebar-footer">
+          <button 
+            className="logout-btn"
+            onClick={() => {
+              setAdminAuthenticated(false);
+              setIsAdminMode(false);
+            }}
+          >
+            ← Back to Wallet
+          </button>
+        </div>
+      </div>
+      
+      <div className="admin-content">
+        {adminView === 'dashboard' && (
+          <div className="dashboard-view">
+            <h1>Admin Dashboard</h1>
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-value">{allWallets.length}</div>
+                <div className="stat-label">Total Wallets</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">{frozenWallets.length}</div>
+                <div className="stat-label">Frozen Wallets</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">{transactions.length}</div>
+                <div className="stat-label">Transactions</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">24/7</div>
+                <div className="stat-label">System Status</div>
+              </div>
+            </div>
+            
+            <div className="recent-activity">
+              <h2>Recent Activity</h2>
+              <div className="activity-list">
+                {adminLogs.slice(0, 10).map(log => (
+                  <div key={log.id} className="activity-item">
+                    <span className="activity-time">[{log.timestamp}]</span>
+                    <span className={`activity-type ${log.type}`}>{log.type}</span>
+                    <span className="activity-message">{log.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {adminView === 'wallets' && (
+          <div className="wallets-view">
+            <h1>Wallet Management</h1>
+            <div className="table-container">
+              <table className="wallets-table">
+                <thead>
+                  <tr>
+                    <th>Wallet</th>
+                    <th>Address</th>
+                    <th>Chain</th>
+                    <th>Balance</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allWallets.map(wallet => (
+                    <tr key={wallet.id}>
+                      <td>
+                        <div className="wallet-cell">
+                          <span className="wallet-icon-cell">{wallet.icon}</span>
+                          {wallet.name}
+                        </div>
+                      </td>
+                      <td className="mono">{wallet.address.slice(0, 16)}...</td>
+                      <td>{getNetworkName(wallet.chain)}</td>
+                      <td>{wallet.balance} {wallet.type === 'evm' ? 'ETH' : 'SOL'}</td>
+                      <td>
+                        <span className={`status-badge ${frozenWallets.includes(wallet.address) ? 'frozen' : 'active'}`}>
+                          {frozenWallets.includes(wallet.address) ? '❄️ Frozen' : '✅ Active'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="action-buttons">
+                          {frozenWallets.includes(wallet.address) ? (
+                            <button 
+                              className="action-btn-small unfreeze"
+                              onClick={() => unfreezeWallet(wallet.address)}
+                            >
+                              Unfreeze
+                            </button>
+                          ) : (
+                            <button 
+                              className="action-btn-small freeze"
+                              onClick={() => freezeWallet(wallet.address)}
+                            >
+                              Freeze
+                            </button>
+                          )}
+                          <button 
+                            className="action-btn-small send"
+                            onClick={() => adminSendTransaction(wallet.address)}
+                          >
+                            Send
+                          </button>
+                          <button 
+                            className="action-btn-small refresh"
+                            onClick={() => refreshBalances()}
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        
+        {adminView === 'logs' && (
+          <div className="logs-view">
+            <h1>System Logs</h1>
+            <div className="logs-controls">
+              <button 
+                className="clear-logs-btn"
+                onClick={() => {
+                  setAdminLogs([]);
+                  localStorage.setItem('adminLogs', '[]');
+                }}
+              >
+                Clear Logs
+              </button>
+            </div>
+            <div className="logs-container">
+              {adminLogs.map(log => (
+                <div key={log.id} className={`log-entry ${log.type}`}>
+                  <span className="log-time">[{log.timestamp}]</span>
+                  <span className="log-wallet">[{log.wallet.slice(0, 8)}...]</span>
+                  <span className="log-message">{log.message}</span>
+                </div>
+              ))}
+              <div ref={logsEndRef} />
+            </div>
+          </div>
+        )}
+        
+        {adminView === 'transactions' && (
+          <div className="transactions-view">
+            <h1>Transaction History</h1>
+            <div className="table-container">
+              <table className="transactions-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Amount</th>
+                    <th>Token</th>
+                    <th>Network</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.map(tx => (
+                    <tr key={tx.id}>
+                      <td>{new Date(tx.timestamp).toLocaleTimeString()}</td>
+                      <td className="mono">{tx.from?.slice(0, 12)}...</td>
+                      <td className="mono">{tx.to?.slice(0, 12)}...</td>
+                      <td>{tx.amount}</td>
+                      <td>{tx.token}</td>
+                      <td>{tx.network}</td>
+                      <td>
+                        <span className="status-badge confirmed">
+                          {tx.hash ? '✅ Confirmed' : '⏳ Pending'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        
+        {adminView === 'controls' && (
+          <div className="controls-view">
+            <h1>System Controls</h1>
+            <div className="controls-grid">
+              <div className="control-card">
+                <h3>💰 Force Refresh All Balances</h3>
+                <p>Update balances for all tracked wallets</p>
+                <button 
+                  className="control-btn"
+                  onClick={refreshBalances}
+                >
+                  Refresh Now
+                </button>
+              </div>
+              
+              <div className="control-card">
+                <h3>📊 Update Token Prices</h3>
+                <p>Fetch latest prices from CoinGecko</p>
+                <button 
+                  className="control-btn"
+                  onClick={fetchTokenPrices}
+                >
+                  Update Prices
+                </button>
+              </div>
+              
+              <div className="control-card">
+                <h3>🧹 Clear All Data</h3>
+                <p>Reset all wallets and transactions</p>
+                <button 
+                  className="control-btn danger"
+                  onClick={() => {
+                    if (window.confirm('This will delete all data. Continue?')) {
+                      localStorage.clear();
+                      window.location.reload();
+                    }
+                  }}
+                >
+                  Clear Data
+                </button>
+              </div>
+              
+              <div className="control-card">
+                <h3>🔐 Security Log</h3>
+                <p>View security events and access logs</p>
+                <button 
+                  className="control-btn"
+                  onClick={() => setAdminView('logs')}
+                >
+                  View Logs
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {adminAuthenticated ? <AdminPanel /> : <WalletPanel />}
       
       <style jsx>{`
-        :root[data-theme="light"] {
-          --bg-primary: #f8fafc;
-          --bg-secondary: #ffffff;
-          --bg-tertiary: #f1f5f9;
-          --text-primary: #1e293b;
-          --text-secondary: #64748b;
-          --border-color: #e2e8f0;
-          --accent-primary: #3b82f6;
-          --accent-danger: #ef4444;
-          --accent-success: #10b981;
-          --shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        
-        :root[data-theme="dark"] {
-          --bg-primary: #0f172a;
-          --bg-secondary: #1e293b;
-          --bg-tertiary: #334155;
-          --text-primary: #f1f5f9;
-          --text-secondary: #cbd5e1;
-          --border-color: #475569;
-          --accent-primary: #60a5fa;
-          --accent-danger: #f87171;
-          --accent-success: #34d399;
-          --shadow: 0 1px 3px rgba(0,0,0,0.3);
-        }
-        
         * {
           margin: 0;
           padding: 0;
           box-sizing: border-box;
-          transition: background-color 0.3s, color 0.3s;
+        }
+        
+        :root {
+          --bg-primary: #0A0A0A;
+          --bg-secondary: #111111;
+          --bg-tertiary: #1A1A1A;
+          --accent-yellow: #F5C400;
+          --accent-glow: rgba(245, 196, 0, 0.4);
+          --text-primary: #FFFFFF;
+          --text-secondary: #AAAAAA;
+          --text-tertiary: #666666;
+          --border-color: #333333;
+          --success: #10B981;
+          --danger: #EF4444;
+          --warning: #F59E0B;
+          --info: #3B82F6;
+          --glass-bg: rgba(255, 255, 255, 0.05);
+          --glass-border: rgba(255, 255, 255, 0.1);
+          --shadow-glow: 0 0 20px var(--accent-glow);
+          --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.3);
         }
         
         body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           background-color: var(--bg-primary);
           color: var(--text-primary);
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
           min-height: 100vh;
+          overflow-x: hidden;
         }
         
-        .app {
+        .wallet-panel, .admin-panel {
           min-height: 100vh;
-          padding: 20px;
-          max-width: 1600px;
-          margin: 0 auto;
+          animation: fadeIn 0.5s ease-out;
+        }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
         }
         
         .header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 30px;
-          padding-bottom: 20px;
+          padding: 20px 40px;
+          background: var(--bg-secondary);
           border-bottom: 1px solid var(--border-color);
+          box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+          position: sticky;
+          top: 0;
+          z-index: 100;
         }
         
-        .header h1 {
-          font-size: 24px;
-          font-weight: 600;
-        }
-        
-        .header-controls {
+        .logo {
           display: flex;
-          gap: 10px;
-        }
-        
-        .main-content {
-          display: grid;
-          grid-template-columns: 1fr 2fr 1fr;
-          gap: 20px;
-          margin-bottom: 30px;
-        }
-        
-        .section {
-          background-color: var(--bg-secondary);
-          border-radius: 12px;
-          padding: 20px;
-          box-shadow: var(--shadow);
-          margin-bottom: 20px;
-        }
-        
-        .section h2 {
-          font-size: 18px;
-          margin-bottom: 15px;
-          color: var(--text-primary);
-        }
-        
-        .section h3, .section h4, .section h5 {
-          margin-bottom: 10px;
-          color: var(--text-primary);
-        }
-        
-        .connector-grid {
-          display: grid;
+          align-items: center;
           gap: 15px;
         }
         
-        .connector-section {
-          background-color: var(--bg-tertiary);
-          padding: 15px;
-          border-radius: 8px;
+        .logo-icon {
+          font-size: 32px;
+          animation: pulse 2s infinite;
         }
         
-        .connector-btn {
-          width: 100%;
-          padding: 12px;
-          margin-bottom: 8px;
-          background-color: var(--bg-secondary);
-          border: 1px solid var(--border-color);
-          border-radius: 8px;
-          color: var(--text-primary);
-          cursor: pointer;
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.1); }
+        }
+        
+        h1 {
+          background: linear-gradient(45deg, var(--accent-yellow), #FFD700);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          font-size: 28px;
+          font-weight: 700;
+          letter-spacing: -0.5px;
+        }
+        
+        .header-actions {
           display: flex;
-          align-items: center;
-          gap: 10px;
-          transition: all 0.2s;
+          gap: 15px;
         }
         
-        .connector-btn:hover:not(:disabled) {
-          background-color: var(--accent-primary);
-          color: white;
-          border-color: var(--accent-primary);
+        .admin-btn, .theme-toggle {
+          padding: 10px 20px;
+          background: var(--glass-bg);
+          border: 1px solid var(--glass-border);
+          border-radius: 12px;
+          color: var(--text-primary);
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s;
+          backdrop-filter: blur(10px);
         }
         
-        .connector-btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
+        .admin-btn:hover, .theme-toggle:hover {
+          background: var(--accent-yellow);
+          color: var(--bg-primary);
+          border-color: var(--accent-yellow);
+          box-shadow: var(--shadow-glow);
+        }
+        
+        .wallet-content {
+          padding: 40px;
+          max-width: 1200px;
+          margin: 0 auto;
+        }
+        
+        .connect-section {
+          text-align: center;
+          padding: 60px 20px;
+        }
+        
+        .connect-header h2 {
+          font-size: 36px;
+          margin-bottom: 15px;
+          background: linear-gradient(45deg, var(--accent-yellow), #FFFFFF);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        
+        .connect-header p {
+          color: var(--text-secondary);
+          font-size: 18px;
+          margin-bottom: 50px;
+        }
+        
+        .wallet-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+          gap: 25px;
+          max-width: 900px;
+          margin: 0 auto;
+        }
+        
+        .wallet-card {
+          background: var(--glass-bg);
+          border: 2px solid var(--glass-border);
+          border-radius: 20px;
+          padding: 30px 20px;
+          cursor: pointer;
+          transition: all 0.3s;
+          position: relative;
+          overflow: hidden;
+          backdrop-filter: blur(10px);
+        }
+        
+        .wallet-card:hover {
+          transform: translateY(-5px);
+          border-color: var(--accent-yellow);
+          box-shadow: var(--shadow-glow);
+        }
+        
+        .wallet-card:hover .wallet-glow {
+          opacity: 1;
         }
         
         .wallet-icon {
-          font-size: 20px;
+          font-size: 40px;
+          margin-bottom: 15px;
         }
         
-        .active-wallet {
-          background-color: var(--bg-tertiary);
-          padding: 20px;
-          border-radius: 8px;
-          border: 2px solid var(--accent-primary);
+        .wallet-card h3 {
+          font-size: 20px;
+          margin-bottom: 8px;
+        }
+        
+        .wallet-card p {
+          color: var(--text-secondary);
+          font-size: 14px;
+        }
+        
+        .wallet-glow {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: radial-gradient(circle at center, var(--accent-glow), transparent 70%);
+          opacity: 0;
+          transition: opacity 0.3s;
+          pointer-events: none;
+        }
+        
+        .wallet-overview {
+          background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
+          border-radius: 24px;
+          padding: 30px;
+          margin-bottom: 30px;
+          border: 1px solid var(--border-color);
+          box-shadow: var(--shadow-card);
         }
         
         .wallet-header {
           display: flex;
-          align-items: center;
-          gap: 10px;
-          margin-bottom: 15px;
-          flex-wrap: wrap;
-        }
-        
-        .wallet-type {
-          background-color: var(--accent-primary);
-          color: white;
-          padding: 4px 8px;
-          border-radius: 4px;
-          font-size: 12px;
-          font-weight: 600;
-        }
-        
-        .wallet-type.evm {
-          background-color: #8b5cf6;
-        }
-        
-        .wallet-type.solana {
-          background-color: #14b8a6;
-        }
-        
-        .wallet-network {
-          background-color: var(--bg-primary);
-          padding: 4px 8px;
-          border-radius: 4px;
-          font-size: 12px;
-          color: var(--text-secondary);
-        }
-        
-        .wallet-address {
-          background-color: var(--bg-primary);
-          padding: 12px;
-          border-radius: 8px;
-          margin-bottom: 20px;
-          display: flex;
           justify-content: space-between;
           align-items: center;
-        }
-        
-        .wallet-address code {
-          font-family: monospace;
-          color: var(--text-primary);
-          font-size: 14px;
-        }
-        
-        .copy-btn {
-          background: none;
-          border: none;
-          color: var(--text-secondary);
-          cursor: pointer;
-          font-size: 16px;
-          padding: 4px;
-        }
-        
-        .copy-btn:hover {
-          color: var(--accent-primary);
-        }
-        
-        .portfolio-summary {
-          text-align: center;
-          margin-bottom: 20px;
-          padding: 20px;
-          background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
-          border-radius: 8px;
-          color: white;
-        }
-        
-        .portfolio-value {
-          font-size: 32px;
-          font-weight: 700;
-          margin-top: 10px;
-        }
-        
-        .balance-section {
-          background-color: var(--bg-primary);
-          padding: 15px;
-          border-radius: 8px;
-        }
-        
-        .native-balance {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 10px 0;
-          border-bottom: 1px solid var(--border-color);
-        }
-        
-        .usd-value {
-          color: var(--accent-success);
-          font-weight: 600;
-        }
-        
-        .gas-price {
-          padding: 10px 0;
-          border-bottom: 1px solid var(--border-color);
-        }
-        
-        .tokens-list, .nfts-list {
-          margin-top: 15px;
-        }
-        
-        .token-item, .nft-item {
-          display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-          border-bottom: 1px dashed var(--border-color);
-        }
-        
-        .transaction-buttons {
-          display: flex;
-          gap: 10px;
-          margin-top: 20px;
-        }
-        
-        .tx-btn {
-          flex: 1;
-          padding: 10px;
-          background-color: var(--accent-primary);
-          color: white;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: 600;
-        }
-        
-        .tx-btn:hover {
-          opacity: 0.9;
-        }
-        
-        .wallet-list {
-          max-height: 400px;
-          overflow-y: auto;
-        }
-        
-        .wallet-item {
-          background-color: var(--bg-tertiary);
-          padding: 15px;
-          margin-bottom: 10px;
-          border-radius: 8px;
-          border: 1px solid var(--border-color);
-          cursor: pointer;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        
-        .wallet-item:hover {
-          border-color: var(--accent-primary);
-        }
-        
-        .wallet-item.active {
-          border-color: var(--accent-primary);
-          background-color: rgba(59, 130, 246, 0.1);
+          margin-bottom: 30px;
         }
         
         .wallet-info {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 20px;
         }
         
-        .wallet-name {
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-        
-        .wallet-address, .wallet-network {
-          font-size: 12px;
-          color: var(--text-secondary);
-        }
-        
-        .remove-btn {
-          background: var(--accent-danger);
-          color: white;
-          border: none;
-          border-radius: 50%;
-          width: 24px;
-          height: 24px;
-          cursor: pointer;
+        .wallet-icon-large {
+          font-size: 48px;
+          background: var(--glass-bg);
+          width: 80px;
+          height: 80px;
+          border-radius: 20px;
           display: flex;
           align-items: center;
           justify-content: center;
+          border: 2px solid var(--glass-border);
         }
         
-        .remove-btn:hover {
-          opacity: 0.9;
+        .wallet-address {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: var(--bg-primary);
+          padding: 10px 15px;
+          border-radius: 12px;
+          margin-top: 8px;
         }
         
-        .transaction-history {
-          max-height: 300px;
-          overflow-y: auto;
+        .wallet-address code {
+          font-family: 'Monaco', 'Courier New', monospace;
+          font-size: 14px;
+          color: var(--text-secondary);
+        }
+        
+        .copy-btn {
+          background: none;
+          border: none;
+          color: var(--accent-yellow);
+          cursor: pointer;
+          font-size: 16px;
+          padding: 5px;
+        }
+        
+        .network-badge {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: var(--bg-primary);
+          padding: 10px 20px;
+          border-radius: 20px;
+          font-size: 14px;
+          font-weight: 600;
+          border: 1px solid var(--glass-border);
+        }
+        
+        .network-dot {
+          width: 10px;
+          height: 10px;
+          background: var(--success);
+          border-radius: 50%;
+          animation: pulse 2s infinite;
+        }
+        
+        .balance-card {
+          text-align: center;
+          padding: 40px;
+          background: linear-gradient(135deg, rgba(245, 196, 0, 0.1), transparent);
+          border-radius: 20px;
+          border: 2px solid var(--glass-border);
+          margin-bottom: 30px;
+          position: relative;
+          overflow: hidden;
+        }
+        
+        .balance-card::before {
+          content: '';
+          position: absolute;
+          top: -50%;
+          left: -50%;
+          right: -50%;
+          bottom: -50%;
+          background: conic-gradient(from 0deg, transparent, var(--accent-yellow), transparent);
+          animation: rotate 4s linear infinite;
+          z-index: 1;
+        }
+        
+        .balance-card > * {
+          position: relative;
+          z-index: 2;
+        }
+        
+        @keyframes rotate {
+          100% { transform: rotate(360deg); }
+        }
+        
+        .balance-label {
+          color: var(--text-secondary);
+          font-size: 14px;
+          text-transform: uppercase;
+          letter-spacing: 2px;
+          margin-bottom: 10px;
+        }
+        
+        .balance-amount {
+          font-size: 56px;
+          font-weight: 700;
+          margin-bottom: 10px;
+          background: linear-gradient(45deg, var(--accent-yellow), #FFFFFF);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        
+        .balance-usd {
+          color: var(--text-secondary);
+          font-size: 18px;
+        }
+        
+        .frozen-warning {
+          background: rgba(239, 68, 68, 0.2);
+          border: 1px solid var(--danger);
+          color: var(--danger);
+          padding: 10px;
+          border-radius: 10px;
+          margin-top: 15px;
+          font-size: 14px;
+        }
+        
+        .action-buttons {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+          gap: 20px;
+        }
+        
+        .action-btn {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 20px 10px;
+          background: var(--glass-bg);
+          border: 2px solid var(--glass-border);
+          border-radius: 16px;
+          color: var(--text-primary);
+          font-size: 16px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s;
+          gap: 10px;
+          backdrop-filter: blur(10px);
+        }
+        
+        .action-btn:hover:not(:disabled) {
+          background: var(--accent-yellow);
+          color: var(--bg-primary);
+          border-color: var(--accent-yellow);
+          transform: translateY(-3px);
+          box-shadow: var(--shadow-glow);
+        }
+        
+        .action-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        
+        .action-icon {
+          font-size: 24px;
+          margin-bottom: 5px;
+        }
+        
+        .action-btn.send {
+          border-color: var(--success);
+        }
+        
+        .action-btn.receive {
+          border-color: var(--info);
+        }
+        
+        .action-btn.swap {
+          border-color: var(--warning);
+        }
+        
+        .action-btn.disconnect {
+          border-color: var(--danger);
+        }
+        
+        .wallet-details {
+          display: grid;
+          grid-template-columns: 2fr 1fr;
+          gap: 30px;
+          margin-bottom: 30px;
+        }
+        
+        @media (max-width: 768px) {
+          .wallet-details {
+            grid-template-columns: 1fr;
+          }
+        }
+        
+        .detail-section {
+          background: var(--bg-secondary);
+          border-radius: 20px;
+          padding: 25px;
+          border: 1px solid var(--border-color);
+        }
+        
+        .detail-section h3 {
+          margin-bottom: 20px;
+          font-size: 20px;
+          color: var(--accent-yellow);
+        }
+        
+        .tokens-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        
+        .token-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 15px;
+          background: var(--glass-bg);
+          border-radius: 12px;
+          border: 1px solid var(--glass-border);
+          transition: all 0.3s;
+        }
+        
+        .token-item:hover {
+          border-color: var(--accent-yellow);
+          transform: translateX(5px);
+        }
+        
+        .token-info {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        
+        .token-symbol {
+          font-weight: 600;
+          font-size: 16px;
+        }
+        
+        .token-balance {
+          color: var(--text-secondary);
+          font-size: 14px;
+        }
+        
+        .token-value {
+          font-weight: 600;
+          color: var(--accent-yellow);
+        }
+        
+        .network-info {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        
+        .info-row {
+          display: flex;
+          justify-content: space-between;
+          padding: 12px 0;
+          border-bottom: 1px solid var(--glass-border);
+        }
+        
+        .info-row:last-child {
+          border-bottom: none;
+        }
+        
+        .mono {
+          font-family: 'Monaco', 'Courier New', monospace;
+          font-size: 13px;
+        }
+        
+        .transactions-section {
+          background: var(--bg-secondary);
+          border-radius: 20px;
+          padding: 25px;
+          border: 1px solid var(--border-color);
+        }
+        
+        .transactions-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          margin-top: 20px;
         }
         
         .transaction-item {
-          background-color: var(--bg-tertiary);
-          padding: 12px;
-          margin-bottom: 8px;
-          border-radius: 6px;
-          border-left: 3px solid var(--accent-primary);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 15px;
+          background: var(--glass-bg);
+          border-radius: 12px;
+          border: 1px solid var(--glass-border);
+          transition: all 0.3s;
+        }
+        
+        .transaction-item:hover {
+          border-color: var(--accent-yellow);
+          transform: translateX(5px);
         }
         
         .tx-type {
+          background: var(--bg-primary);
+          padding: 6px 12px;
+          border-radius: 20px;
+          font-size: 12px;
           font-weight: 600;
-          color: var(--text-primary);
-          margin-bottom: 4px;
+          text-transform: uppercase;
         }
         
         .tx-details {
-          font-size: 12px;
+          flex: 1;
+          margin: 0 20px;
+        }
+        
+        .tx-addresses {
           color: var(--text-secondary);
+          font-size: 13px;
           margin-bottom: 4px;
         }
         
         .tx-amount {
           font-weight: 600;
-          color: var(--accent-primary);
+          color: var(--accent-yellow);
+        }
+        
+        .tx-status {
+          font-size: 20px;
         }
         
         .empty-state {
           text-align: center;
-          padding: 30px;
+          padding: 40px 20px;
           color: var(--text-secondary);
           font-style: italic;
-        }
-        
-        .debug-console {
-          background-color: var(--bg-primary);
-          border-radius: 6px;
-          padding: 15px;
-          max-height: 300px;
-          overflow-y: auto;
-          font-family: monospace;
-          font-size: 12px;
-        }
-        
-        .log-entry {
-          padding: 4px 0;
-          border-bottom: 1px dashed var(--border-color);
-        }
-        
-        .log-entry.info {
-          color: var(--text-secondary);
-        }
-        
-        .log-entry.success {
-          color: var(--accent-success);
-        }
-        
-        .log-entry.error {
-          color: var(--accent-danger);
-        }
-        
-        .log-time {
-          color: var(--text-secondary);
-          margin-right: 10px;
-        }
-        
-        .clear-log-btn {
-          width: 100%;
-          padding: 8px;
-          margin-top: 10px;
-          background-color: var(--bg-tertiary);
-          border: 1px solid var(--border-color);
-          border-radius: 6px;
-          color: var(--text-primary);
-          cursor: pointer;
-        }
-        
-        .system-status {
-          background-color: var(--bg-tertiary);
-          padding: 15px;
-          border-radius: 8px;
-        }
-        
-        .status-item {
-          display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-          border-bottom: 1px solid var(--border-color);
         }
         
         .modal-overlay {
@@ -1474,50 +1700,106 @@ function App() {
           left: 0;
           right: 0;
           bottom: 0;
-          background-color: rgba(0, 0, 0, 0.5);
+          background: rgba(0, 0, 0, 0.8);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 1000;
+          backdrop-filter: blur(5px);
+          animation: fadeIn 0.3s;
         }
         
         .modal {
-          background-color: var(--bg-secondary);
+          background: var(--bg-secondary);
+          border-radius: 24px;
           padding: 30px;
-          border-radius: 12px;
           max-width: 500px;
           width: 90%;
-          box-shadow: var(--shadow);
+          border: 2px solid var(--glass-border);
+          box-shadow: var(--shadow-glow);
+          animation: modalSlide 0.3s;
         }
         
-        .transaction-details {
-          background-color: var(--bg-tertiary);
-          padding: 20px;
-          border-radius: 8px;
+        @keyframes modalSlide {
+          from { transform: translateY(50px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .modal h3 {
+          margin-bottom: 20px;
+          color: var(--accent-yellow);
+        }
+        
+        .modal-content {
           margin: 20px 0;
         }
         
-        .detail-row {
+        .modal-input {
+          width: 100%;
+          padding: 15px;
+          background: var(--bg-primary);
+          border: 2px solid var(--glass-border);
+          border-radius: 12px;
+          color: var(--text-primary);
+          font-size: 16px;
+          margin-bottom: 15px;
+          transition: all 0.3s;
+        }
+        
+        .modal-input:focus {
+          outline: none;
+          border-color: var(--accent-yellow);
+          box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        
+        .amount-row {
           display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-          border-bottom: 1px solid var(--border-color);
+          gap: 15px;
+        }
+        
+        .token-select {
+          flex: 1;
+          padding: 15px;
+          background: var(--bg-primary);
+          border: 2px solid var(--glass-border);
+          border-radius: 12px;
+          color: var(--text-primary);
+          font-size: 16px;
+          min-width: 120px;
+        }
+        
+        .gas-info {
+          background: var(--bg-primary);
+          padding: 12px;
+          border-radius: 10px;
+          color: var(--text-secondary);
+          font-size: 14px;
+          text-align: center;
+          margin-top: 15px;
         }
         
         .modal-actions {
           display: flex;
-          gap: 10px;
+          gap: 15px;
+          margin-top: 25px;
         }
         
         .confirm-btn {
           flex: 2;
-          padding: 12px;
-          background-color: var(--accent-primary);
-          color: white;
+          padding: 15px;
+          background: var(--accent-yellow);
           border: none;
-          border-radius: 6px;
+          border-radius: 12px;
+          color: var(--bg-primary);
+          font-size: 16px;
+          font-weight: 700;
           cursor: pointer;
-          font-weight: 600;
+          transition: all 0.3s;
+        }
+        
+        .confirm-btn:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: var(--shadow-glow);
         }
         
         .confirm-btn:disabled {
@@ -1527,65 +1809,646 @@ function App() {
         
         .cancel-btn {
           flex: 1;
-          padding: 12px;
-          background-color: var(--bg-tertiary);
+          padding: 15px;
+          background: var(--glass-bg);
+          border: 2px solid var(--glass-border);
+          border-radius: 12px;
           color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          border-radius: 6px;
+          font-size: 16px;
           cursor: pointer;
+          transition: all 0.3s;
         }
         
-        .error-alert {
+        .cancel-btn:hover {
+          border-color: var(--danger);
+          color: var(--danger);
+        }
+        
+        .qr-container {
+          display: flex;
+          justify-content: center;
+          margin: 30px 0;
+        }
+        
+        .qr-placeholder {
+          width: 200px;
+          height: 200px;
+          background: var(--bg-primary);
+          border: 2px dashed var(--glass-border);
+          border-radius: 20px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          color: var(--text-secondary);
+        }
+        
+        .qr-icon {
+          font-size: 60px;
+          margin-bottom: 15px;
+        }
+        
+        .address-display {
+          background: var(--bg-primary);
+          padding: 20px;
+          border-radius: 12px;
+          margin: 20px 0;
+          text-align: center;
+        }
+        
+        .address-display code {
+          display: block;
+          font-family: 'Monaco', monospace;
+          font-size: 14px;
+          color: var(--text-secondary);
+          margin-bottom: 15px;
+          word-break: break-all;
+        }
+        
+        .copy-btn-large {
+          width: 100%;
+          padding: 15px;
+          background: var(--glass-bg);
+          border: 2px solid var(--accent-yellow);
+          border-radius: 12px;
+          color: var(--accent-yellow);
+          font-size: 16px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s;
+        }
+        
+        .copy-btn-large:hover {
+          background: var(--accent-yellow);
+          color: var(--bg-primary);
+        }
+        
+        .error-toast {
           position: fixed;
-          bottom: 20px;
-          right: 20px;
-          background-color: var(--accent-danger);
+          bottom: 30px;
+          right: 30px;
+          background: var(--danger);
           color: white;
           padding: 15px 20px;
-          border-radius: 8px;
+          border-radius: 12px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 15px;
+          gap: 20px;
           max-width: 400px;
-          box-shadow: var(--shadow);
+          z-index: 1000;
+          animation: slideIn 0.3s;
+          border-left: 5px solid #DC2626;
         }
         
-        .error-alert button {
+        @keyframes slideIn {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .error-toast button {
           background: none;
           border: none;
           color: white;
+          font-size: 20px;
           cursor: pointer;
-          font-size: 18px;
+          padding: 0 5px;
         }
         
-        .theme-toggle, .refresh-btn {
-          background-color: var(--bg-secondary);
-          border: 1px solid var(--border-color);
-          border-radius: 6px;
-          padding: 8px 12px;
-          color: var(--text-primary);
-          cursor: pointer;
+        /* Admin Panel Styles */
+        .admin-panel {
+          display: flex;
+          min-height: 100vh;
+        }
+        
+        .admin-sidebar {
+          width: 280px;
+          background: var(--bg-secondary);
+          border-right: 1px solid var(--border-color);
+          display: flex;
+          flex-direction: column;
+        }
+        
+        .sidebar-header {
+          padding: 30px 20px;
+          border-bottom: 1px solid var(--border-color);
+        }
+        
+        .admin-logo {
+          display: flex;
+          align-items: center;
+          gap: 15px;
+        }
+        
+        .admin-icon {
+          font-size: 32px;
+          background: linear-gradient(45deg, gold, var(--accent-yellow));
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        
+        .admin-logo h2 {
+          font-size: 20px;
+          background: linear-gradient(45deg, gold, var(--accent-yellow));
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        
+        .sidebar-menu {
+          flex: 1;
+          padding: 20px 0;
+        }
+        
+        .menu-item {
+          width: 100%;
+          padding: 18px 25px;
+          background: none;
+          border: none;
+          color: var(--text-secondary);
           font-size: 16px;
+          text-align: left;
+          cursor: pointer;
+          transition: all 0.3s;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          border-left: 4px solid transparent;
         }
         
-        .theme-toggle:hover, .refresh-btn:hover:not(:disabled) {
-          background-color: var(--accent-primary);
+        .menu-item:hover {
+          background: rgba(245, 196, 0, 0.1);
+          color: var(--accent-yellow);
+          border-left-color: var(--accent-yellow);
+        }
+        
+        .menu-item.active {
+          background: rgba(245, 196, 0, 0.2);
+          color: var(--accent-yellow);
+          border-left-color: var(--accent-yellow);
+          font-weight: 600;
+        }
+        
+        .sidebar-footer {
+          padding: 20px;
+          border-top: 1px solid var(--border-color);
+        }
+        
+        .logout-btn {
+          width: 100%;
+          padding: 15px;
+          background: var(--glass-bg);
+          border: 2px solid var(--glass-border);
+          border-radius: 12px;
+          color: var(--text-primary);
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s;
+        }
+        
+        .logout-btn:hover {
+          background: var(--accent-yellow);
+          color: var(--bg-primary);
+          border-color: var(--accent-yellow);
+        }
+        
+        .admin-content {
+          flex: 1;
+          padding: 40px;
+          overflow-y: auto;
+          background: var(--bg-primary);
+        }
+        
+        .admin-content h1 {
+          margin-bottom: 30px;
+          font-size: 32px;
+        }
+        
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 25px;
+          margin-bottom: 40px;
+        }
+        
+        .stat-card {
+          background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
+          border-radius: 20px;
+          padding: 30px;
+          text-align: center;
+          border: 1px solid var(--glass-border);
+          transition: all 0.3s;
+        }
+        
+        .stat-card:hover {
+          transform: translateY(-5px);
+          border-color: var(--accent-yellow);
+          box-shadow: var(--shadow-glow);
+        }
+        
+        .stat-value {
+          font-size: 48px;
+          font-weight: 700;
+          margin-bottom: 10px;
+          background: linear-gradient(45deg, var(--accent-yellow), #FFFFFF);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        
+        .stat-label {
+          color: var(--text-secondary);
+          font-size: 14px;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+        
+        .recent-activity, .wallets-view, .logs-view, .transactions-view, .controls-view, .dashboard-view {
+          background: var(--bg-secondary);
+          border-radius: 24px;
+          padding: 30px;
+          border: 1px solid var(--border-color);
+          margin-bottom: 30px;
+        }
+        
+        .activity-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          max-height: 400px;
+          overflow-y: auto;
+        }
+        
+        .activity-item {
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          padding: 15px;
+          background: var(--glass-bg);
+          border-radius: 12px;
+          border: 1px solid var(--glass-border);
+          font-size: 14px;
+        }
+        
+        .activity-time {
+          color: var(--text-tertiary);
+          font-family: 'Monaco', monospace;
+          min-width: 80px;
+        }
+        
+        .activity-type {
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: uppercase;
+        }
+        
+        .activity-type.connect { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+        .activity-type.disconnect { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .activity-type.tx { background: rgba(59, 130, 246, 0.2); color: var(--info); }
+        .activity-type.admin { background: rgba(245, 196, 0, 0.2); color: var(--accent-yellow); }
+        .activity-type.security { background: rgba(139, 92, 246, 0.2); color: #8B5CF6; }
+        .activity-type.error { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .activity-type.info { background: rgba(156, 163, 175, 0.2); color: #9CA3AF; }
+        
+        .table-container {
+          overflow-x: auto;
+          border-radius: 12px;
+          border: 1px solid var(--glass-border);
+        }
+        
+        .wallets-table, .transactions-table {
+          width: 100%;
+          border-collapse: collapse;
+          min-width: 800px;
+        }
+        
+        .wallets-table th, .transactions-table th {
+          background: var(--bg-tertiary);
+          padding: 18px 20px;
+          text-align: left;
+          color: var(--text-secondary);
+          font-size: 13px;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          font-weight: 600;
+          border-bottom: 1px solid var(--glass-border);
+        }
+        
+        .wallets-table td, .transactions-table td {
+          padding: 18px 20px;
+          border-bottom: 1px solid var(--glass-border);
+          background: var(--bg-secondary);
+        }
+        
+        .wallets-table tr:hover td {
+          background: rgba(245, 196, 0, 0.05);
+        }
+        
+        .wallet-cell {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        
+        .wallet-icon-cell {
+          font-size: 20px;
+        }
+        
+        .status-badge {
+          padding: 6px 12px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 600;
+          display: inline-block;
+        }
+        
+        .status-badge.active {
+          background: rgba(16, 185, 129, 0.2);
+          color: var(--success);
+        }
+        
+        .status-badge.frozen {
+          background: rgba(59, 130, 246, 0.2);
+          color: var(--info);
+        }
+        
+        .status-badge.confirmed {
+          background: rgba(16, 185, 129, 0.2);
+          color: var(--success);
+        }
+        
+        .action-buttons {
+          display: flex;
+          gap: 8px;
+        }
+        
+        .action-btn-small {
+          padding: 6px 12px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          border: none;
+          transition: all 0.3s;
+        }
+        
+        .action-btn-small.freeze {
+          background: rgba(59, 130, 246, 0.2);
+          color: var(--info);
+          border: 1px solid var(--info);
+        }
+        
+        .action-btn-small.freeze:hover {
+          background: var(--info);
           color: white;
         }
         
-        .refresh-btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
+        .action-btn-small.unfreeze {
+          background: rgba(16, 185, 129, 0.2);
+          color: var(--success);
+          border: 1px solid var(--success);
         }
         
-        @media (max-width: 1200px) {
-          .main-content {
-            grid-template-columns: 1fr;
+        .action-btn-small.unfreeze:hover {
+          background: var(--success);
+          color: white;
+        }
+        
+        .action-btn-small.send {
+          background: rgba(245, 196, 0, 0.2);
+          color: var(--accent-yellow);
+          border: 1px solid var(--accent-yellow);
+        }
+        
+        .action-btn-small.send:hover {
+          background: var(--accent-yellow);
+          color: var(--bg-primary);
+        }
+        
+        .action-btn-small.refresh {
+          background: rgba(156, 163, 175, 0.2);
+          color: #9CA3AF;
+          border: 1px solid #9CA3AF;
+        }
+        
+        .action-btn-small.refresh:hover {
+          background: #9CA3AF;
+          color: white;
+        }
+        
+        .logs-controls {
+          margin-bottom: 20px;
+        }
+        
+        .clear-logs-btn {
+          padding: 10px 20px;
+          background: rgba(239, 68, 68, 0.2);
+          border: 1px solid var(--danger);
+          border-radius: 12px;
+          color: var(--danger);
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s;
+        }
+        
+        .clear-logs-btn:hover {
+          background: var(--danger);
+          color: white;
+        }
+        
+        .logs-container {
+          background: var(--bg-primary);
+          border-radius: 12px;
+          padding: 20px;
+          max-height: 500px;
+          overflow-y: auto;
+          font-family: 'Monaco', 'Courier New', monospace;
+          font-size: 13px;
+        }
+        
+        .log-entry {
+          padding: 12px;
+          border-bottom: 1px solid var(--glass-border);
+          display: flex;
+          gap: 15px;
+          align-items: center;
+        }
+        
+        .log-entry:last-child {
+          border-bottom: none;
+        }
+        
+        .log-time {
+          color: var(--text-tertiary);
+          min-width: 80px;
+        }
+        
+        .log-wallet {
+          color: var(--accent-yellow);
+          min-width: 100px;
+        }
+        
+        .log-message {
+          color: var(--text-primary);
+          flex: 1;
+        }
+        
+        .controls-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 25px;
+        }
+        
+        .control-card {
+          background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+          border-radius: 20px;
+          padding: 30px;
+          border: 1px solid var(--glass-border);
+          transition: all 0.3s;
+        }
+        
+        .control-card:hover {
+          transform: translateY(-5px);
+          border-color: var(--accent-yellow);
+          box-shadow: var(--shadow-glow);
+        }
+        
+        .control-card h3 {
+          margin-bottom: 15px;
+          color: var(--accent-yellow);
+        }
+        
+        .control-card p {
+          color: var(--text-secondary);
+          margin-bottom: 20px;
+          line-height: 1.5;
+        }
+        
+        .control-btn {
+          width: 100%;
+          padding: 15px;
+          background: var(--glass-bg);
+          border: 2px solid var(--glass-border);
+          border-radius: 12px;
+          color: var(--text-primary);
+          font-size: 16px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s;
+        }
+        
+        .control-btn:hover {
+          background: var(--accent-yellow);
+          color: var(--bg-primary);
+          border-color: var(--accent-yellow);
+        }
+        
+        .control-btn.danger {
+          border-color: var(--danger);
+          color: var(--danger);
+        }
+        
+        .control-btn.danger:hover {
+          background: var(--danger);
+          color: white;
+        }
+        
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+          width: 10px;
+        }
+        
+        ::-webkit-scrollbar-track {
+          background: var(--bg-primary);
+        }
+        
+        ::-webkit-scrollbar-thumb {
+          background: var(--glass-border);
+          border-radius: 5px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+          background: var(--accent-yellow);
+        }
+        
+        /* Loading State */
+        @keyframes shimmer {
+          0% { background-position: -1000px 0; }
+          100% { background-position: 1000px 0; }
+        }
+        
+        .loading {
+          background: linear-gradient(to right, var(--bg-secondary) 4%, var(--bg-tertiary) 25%, var(--bg-secondary) 36%);
+          background-size: 1000px 100%;
+          animation: shimmer 2s infinite;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+          .header {
+            padding: 20px;
+            flex-direction: column;
+            gap: 15px;
+          }
+          
+          .wallet-content {
+            padding: 20px;
+          }
+          
+          .balance-amount {
+            font-size: 40px;
+          }
+          
+          .action-buttons {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          
+          .admin-panel {
+            flex-direction: column;
+          }
+          
+          .admin-sidebar {
+            width: 100%;
+            border-right: none;
+            border-bottom: 1px solid var(--border-color);
+          }
+          
+          .sidebar-menu {
+            display: flex;
+            overflow-x: auto;
+            padding: 15px;
+          }
+          
+          .menu-item {
+            white-space: nowrap;
+            border-left: none;
+            border-bottom: 4px solid transparent;
+            padding: 12px 20px;
+          }
+          
+          .menu-item.active {
+            border-left: none;
+            border-bottom-color: var(--accent-yellow);
+          }
+          
+          .menu-item:hover {
+            border-left: none;
+            border-bottom-color: var(--accent-yellow);
+          }
+          
+          .admin-content {
+            padding: 20px;
           }
         }
+        
+        /* WalletConnect Modal Override */
+        wcm-modal {
+          --wcm-z-index: 9999 !important;
+        }
       `}</style>
-    </div>
+    </>
   );
 }
 
