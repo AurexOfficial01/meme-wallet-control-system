@@ -1,7 +1,7 @@
 {
   "name": "wallet-connect-app",
   "version": "1.0.0",
-  "description": "Wallet Connect Demo App",
+  "description": "Multi-Wallet Dashboard",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,6 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "ethers": "^6.7.1",
-    "@walletconnect/modal": "^2.6.2",
     "@walletconnect/ethereum-provider": "^2.11.0"
   },
   "devDependencies": {
