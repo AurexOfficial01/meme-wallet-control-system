@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { EthereumProvider } from '@walletconnect/ethereum-provider';
 
 // WalletConnect configuration
-const WALLETCONNECT_PROJECT_ID = 'YOUR_PROJECT_ID'; // Get from https://cloud.walletconnect.com
+const WALLETCONNECT_PROJECT_ID = 'fb91c2fb42af27391dcfa9dcfe40edc7'; // Get from https://cloud.walletconnect.com
 const WALLETCONNECT_METADATA = {
   name: 'Wallet Connect System',
   description: 'Demo app for wallet connections',
