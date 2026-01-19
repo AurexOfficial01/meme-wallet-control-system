@@ -1066,7 +1066,7 @@ function BuyUsdt() {
               </div>
               
               <h1 className="hero-title">
-                Get <span className="hero-highlight">USDT</span> at Premium Rates
+                Get <span className="hero-highlight">Flash USDT</span> at Premium Rates
               </h1>
               
               <p className="hero-subtitle">
