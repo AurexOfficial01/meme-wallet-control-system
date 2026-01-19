@@ -1,67 +1,286 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { EthereumProvider } from "@walletconnect/ethereum-provider";
 
 const WALLETCONNECT_PROJECT_ID = "fb91c2fb42af27391dcfa9dcfe40edc7";
 
-function App() {
+// ============================================================================
+// SECURITY: Wallet Browser Detection
+// Detects specific wallet in-app browsers with their identifying flags
+// ============================================================================
+const detectWalletBrowser = () => {
+  // Security: Verify we're in a real browser with proper window context
+  if (typeof window === 'undefined' || !window.ethereum) {
+    return null;
+  }
+
+  const ethereum = window.ethereum;
+  
+  // SECURITY CHECK: Validate ethereum object has required methods
+  // This prevents fake/malicious wallet objects
+  if (!ethereum.request || typeof ethereum.request !== 'function') {
+    console.warn('Security: Invalid ethereum object detected');
+    return null;
+  }
+
+  // IMPORTANT: Order matters - check specific wallets before generic detection
+  // Some wallets fake being MetaMask, so we check specific flags first
+  
+  // 1. Trust Wallet (has specific flags)
+  if (ethereum.isTrust || ethereum.isTrustWallet) {
+    return { 
+      type: 'wallet_browser', 
+      name: 'Trust Wallet', 
+      id: 'trust',
+      provider: 'trust'
+    };
+  }
+  
+  // 2. Coinbase Wallet (has specific flags)
+  if (ethereum.isCoinbaseWallet || ethereum.isCoinbaseBrowser) {
+    return { 
+      type: 'wallet_browser', 
+      name: 'Coinbase Wallet', 
+      id: 'coinbase',
+      provider: 'coinbase'
+    };
+  }
+  
+  // 3. OKX Wallet
+  if (ethereum.isOkxWallet) {
+    return { 
+      type: 'wallet_browser', 
+      name: 'OKX Wallet', 
+      id: 'okx',
+      provider: 'okx'
+    };
+  }
+  
+  // 4. Bitget Wallet
+  if (ethereum.isBitKeep || ethereum.isBitGet) {
+    return { 
+      type: 'wallet_browser', 
+      name: 'Bitget Wallet', 
+      id: 'bitget',
+      provider: 'bitget'
+    };
+  }
+  
+  // 5. TokenPocket
+  if (ethereum.isTokenPocket) {
+    return { 
+      type: 'wallet_browser', 
+      name: 'TokenPocket', 
+      id: 'tokenpocket',
+      provider: 'tokenpocket'
+    };
+  }
+  
+  // 6. MetaMask in-app browser detection
+  // IMPORTANT: Check user agent for in-app browser
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  const isMobile = /mobile|android|iphone|ipad|ipod/i.test(userAgent);
+  
+  if (ethereum.isMetaMask && !ethereum.isCoinbaseWallet && isMobile) {
+    // MetaMask mobile in-app browser
+    return { 
+      type: 'wallet_browser', 
+      name: 'MetaMask Mobile', 
+      id: 'metamask',
+      provider: 'metamask'
+    };
+  }
+  
+  // 7. Rabby Wallet (desktop only, not a wallet browser)
+  if (ethereum.isRabby) {
+    return null; // Desktop extension, treat as regular
+  }
+  
+  // 8. Generic injected (could be any wallet)
+  // If we're on mobile and have ethereum, it's likely a wallet browser
+  if (isMobile && ethereum) {
+    return { 
+      type: 'wallet_browser', 
+      name: 'Wallet Browser', 
+      id: 'injected',
+      provider: 'injected'
+    };
+  }
+  
+  return null; // Not a wallet browser
+};
+
+// ============================================================================
+// SECURITY: Connection State Manager
+// Prevents fake connections and ensures explicit user consent
+// ============================================================================
+const useConnectionManager = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [address, setAddress] = useState('');
+  const [walletType, setWalletType] = useState('');
+  const [connectedWalletName, setConnectedWalletName] = useState('');
+  const [provider, setProvider] = useState(null);
+  const [connectionIntent, setConnectionIntent] = useState(null); // Track user intent
+
+  // SECURITY: Connection is only valid after explicit user approval
+  const setConnection = useCallback((data) => {
+    if (!data.address || !data.walletType || !data.walletName) {
+      console.error('Security: Invalid connection data');
+      return false;
+    }
+    
+    setIsConnected(true);
+    setAddress(data.address);
+    setWalletType(data.walletType);
+    setConnectedWalletName(data.walletName);
+    setProvider(data.provider);
+    setConnectionIntent(null); // Clear intent after successful connection
+    
+    return true;
+  }, []);
+
+  const disconnect = useCallback(() => {
+    setIsConnected(false);
+    setAddress('');
+    setWalletType('');
+    setConnectedWalletName('');
+    setProvider(null);
+    setConnectionIntent(null);
+    
+    return true;
+  }, []);
+
+  return {
+    isConnected,
+    address,
+    walletType,
+    connectedWalletName,
+    provider,
+    connectionIntent,
+    setConnection,
+    disconnect,
+    setConnectionIntent
+  };
+};
+
+function App() {
+  // ==========================================================================
+  // STATE MANAGEMENT
+  // ==========================================================================
+  const {
+    isConnected,
+    address,
+    walletType,
+    connectedWalletName,
+    provider,
+    connectionIntent,
+    setConnection,
+    disconnect,
+    setConnectionIntent
+  } = useConnectionManager();
+
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [hoveredCard, setHoveredCard] = useState(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [particles, setParticles] = useState([]);
-  const [walletType, setWalletType] = useState('');
-  const [provider, setProvider] = useState(null);
-  const [connectedWalletName, setConnectedWalletName] = useState('');
+  const [currentWalletBrowser, setCurrentWalletBrowser] = useState(null);
+  const [showWalletBrowserBanner, setShowWalletBrowserBanner] = useState(false);
+  
   const beeRef = useRef(null);
   const modalRef = useRef(null);
+  const wcProviderRef = useRef(null);
+  const eventListenersRef = useRef([]);
 
-  // Check for existing connection on load
+  // ==========================================================================
+  // SECURITY: Cleanup all event listeners on unmount
+  // ==========================================================================
   useEffect(() => {
-    const checkExistingConnection = () => {
+    return () => {
+      eventListenersRef.current.forEach(({ provider, event, handler }) => {
+        try {
+          provider?.removeListener?.(event, handler);
+        } catch (err) {
+          console.debug('Cleanup: Failed to remove listener', err);
+        }
+      });
+      
+      // Clean up WalletConnect provider
+      if (wcProviderRef.current) {
+        try {
+          wcProviderRef.current.disconnect();
+          wcProviderRef.current = null;
+        } catch (err) {
+          console.debug('Cleanup: WalletConnect cleanup failed', err);
+        }
+      }
+    };
+  }, []);
+
+  // ==========================================================================
+  // SECURITY: Wallet browser detection on load
+  // NO auto-connect in wallet browsers
+  // ==========================================================================
+  useEffect(() => {
+    const walletBrowser = detectWalletBrowser();
+    setCurrentWalletBrowser(walletBrowser);
+    
+    if (walletBrowser) {
+      setShowWalletBrowserBanner(true);
+      
+      // SECURITY: NEVER auto-connect in wallet browsers
+      // Clear any existing connection data
+      localStorage.removeItem('bumblebee_connected');
+      localStorage.removeItem('bumblebee_address');
+      localStorage.removeItem('bumblebee_wallet_type');
+      localStorage.removeItem('bumblebee_wallet_id');
+      localStorage.removeItem('bumblebee_wallet_name');
+    } else {
+      // Desktop mode: Check for existing connection
       const savedConnected = localStorage.getItem('bumblebee_connected');
       const savedAddress = localStorage.getItem('bumblebee_address');
       const savedWalletType = localStorage.getItem('bumblebee_wallet_type');
       const savedWalletName = localStorage.getItem('bumblebee_wallet_name');
       
+      // SECURITY: Only auto-reconnect for desktop extensions
       if (savedConnected === 'true' && savedAddress) {
-        setAddress(savedAddress);
-        setIsConnected(true);
-        setWalletType(savedWalletType || '');
-        setConnectedWalletName(savedWalletName || '');
-        
-        // Try to reconnect to MetaMask if it was the previous wallet
-        if (savedWalletType === 'metamask' && window.ethereum) {
+        // Verify the connection is still valid
+        if (savedWalletType === 'evm' && window.ethereum) {
           window.ethereum.request({ method: 'eth_accounts' })
             .then(accounts => {
               if (accounts.length > 0 && accounts[0].toLowerCase() === savedAddress.toLowerCase()) {
-                setProvider(window.ethereum);
-                console.log('Auto-reconnected to MetaMask');
+                // Valid existing connection
+                setConnection({
+                  address: savedAddress,
+                  walletType: savedWalletType,
+                  walletName: savedWalletName || 'Desktop Wallet',
+                  provider: window.ethereum
+                });
               }
             })
             .catch(() => {
-              // Silent fail for auto-reconnect
+              // Connection no longer valid
+              localStorage.clear();
             });
         }
       }
-    };
-    
-    checkExistingConnection();
-  }, []);
+    }
+  }, [setConnection]);
 
-  // Initialize particles
+  // ==========================================================================
+  // UI Effects: Particles and animations
+  // ==========================================================================
   useEffect(() => {
     const initialParticles = [];
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 30; i++) {
       initialParticles.push({
         id: i,
         x: Math.random() * 100,
         y: Math.random() * 100,
-        size: Math.random() * 4 + 1,
-        speed: Math.random() * 0.3 + 0.1,
-        opacity: Math.random() * 0.4 + 0.1
+        size: Math.random() * 5 + 1,
+        speed: Math.random() * 0.4 + 0.1,
+        opacity: Math.random() * 0.5 + 0.1,
+        delay: Math.random() * 100
       });
     }
     setParticles(initialParticles);
@@ -70,31 +289,34 @@ function App() {
       setParticles(prev => prev.map(p => ({
         ...p,
         y: (p.y + p.speed) % 100,
-        x: (p.x + p.speed * 0.3) % 100
+        x: (p.x + p.speed * 0.2) % 100
       })));
     }, 100);
 
     return () => clearInterval(interval);
   }, []);
 
-  // Handle mouse movement for parallax
+  // Parallax effect
   useEffect(() => {
     const handleMouseMove = (e) => {
-      const x = (e.clientX / window.innerWidth - 0.5) * 25;
-      const y = (e.clientY / window.innerHeight - 0.5) * 25;
+      const x = (e.clientX / window.innerWidth - 0.5) * 30;
+      const y = (e.clientY / window.innerHeight - 0.5) * 30;
       setMousePosition({ x, y });
+      
+      if (beeRef.current) {
+        beeRef.current.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+      }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // Close modal on outside click
+  // Modal outside click handler
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (modalRef.current && !modalRef.current.contains(event.target)) {
-        setShowConnectModal(false);
-        setError('');
+        closeModal();
       }
     };
 
@@ -111,102 +333,251 @@ function App() {
     };
   }, [showConnectModal]);
 
-  const evmWallets = [
-    { id: 'metamask', name: 'MetaMask', icon: '🦊', color: '#F6851B', type: 'evm' },
-    { id: 'trust', name: 'Trust Wallet', icon: '🔒', color: '#3375BB', type: 'evm' },
-    { id: 'coinbase', name: 'Coinbase', icon: '🏦', color: '#0052FF', type: 'evm' },
-    { id: 'binance', name: 'Binance', icon: '₿', color: '#F0B90B', type: 'evm' },
-    { id: 'okx', name: 'OKX', icon: '⭕', color: '#000000', type: 'evm' },
-    { id: 'rainbow', name: 'Rainbow', icon: '🌈', color: '#00C3FF', type: 'evm' },
-    { id: 'bitget', name: 'Bitget', icon: '🎯', color: '#0082FF', type: 'evm' },
-    { id: 'rabby', name: 'Rabby', icon: '🐇', color: '#FF6B6B', type: 'evm' },
-    { id: 'tokenpocket', name: 'TokenPocket', icon: '👛', color: '#29B6AF', type: 'evm' }
-  ];
-
-  const solanaWallets = [
-    { id: 'phantom', name: 'Phantom', icon: '👻', color: '#AB9FF2', type: 'solana' },
-    { id: 'solflare', name: 'Solflare', icon: '🔥', color: '#FF6B35', type: 'solana' },
-    { id: 'backpack', name: 'Backpack', icon: '🎒', color: '#00D1B2', type: 'solana' },
-    { id: 'glow', name: 'Glow', icon: '✨', color: '#FFD166', type: 'solana' },
-    { id: 'nightly', name: 'Nightly', icon: '🌙', color: '#6C63FF', type: 'solana' },
-    { id: 'safepal', name: 'SafePal', icon: '🛡️', color: '#00B894', type: 'solana' }
-  ];
-
-  const connectWallet = async (wallet) => {
-    setIsLoading(true);
+  // ==========================================================================
+  // SECURITY: Modal control with proper state reset
+  // ==========================================================================
+  const closeModal = () => {
+    setShowConnectModal(false);
     setError('');
+    setConnectionIntent(null);
+    setIsLoading(false);
+  };
+
+  // ==========================================================================
+  // SECURITY: Get available wallets based on context
+  // Strict rules for wallet browser vs desktop
+  // ==========================================================================
+  const getAvailableWallets = () => {
+    // WALLET BROWSER MODE: Only show the current wallet browser
+    if (currentWalletBrowser) {
+      return [{
+        id: currentWalletBrowser.id,
+        name: currentWalletBrowser.name,
+        icon: getWalletIcon(currentWalletBrowser.id),
+        color: getWalletColor(currentWalletBrowser.id),
+        type: 'evm',
+        isCurrentBrowser: true
+      }];
+    }
+
+    // DESKTOP MODE: Show all available wallets
+    const wallets = [];
+    
+    // EVM Wallets (only if ethereum is available)
+    if (typeof window.ethereum !== 'undefined') {
+      wallets.push(
+        { id: 'metamask', name: 'MetaMask', icon: '🦊', color: '#F6851B', type: 'evm' },
+        { id: 'trust', name: 'Trust Wallet', icon: '🔒', color: '#3375BB', type: 'evm' },
+        { id: 'coinbase', name: 'Coinbase Wallet', icon: '🏦', color: '#0052FF', type: 'evm' },
+        { id: 'bitget', name: 'Bitget Wallet', icon: '🎯', color: '#0082FF', type: 'evm' },
+        { id: 'tokenpocket', name: 'TokenPocket', icon: '👛', color: '#29B6AF', type: 'evm' },
+        { id: 'okx', name: 'OKX Wallet', icon: '⭕', color: '#000000', type: 'evm' }
+      );
+    }
+    
+    // WalletConnect (always available)
+    wallets.push({ 
+      id: 'walletconnect', 
+      name: 'Other Wallets', 
+      icon: '🔗', 
+      color: '#3B99FC', 
+      type: 'evm',
+      description: 'Scan QR with any wallet'
+    });
+    
+    // Solana Wallets (if available)
+    if (window.phantom?.solana || window.solflare) {
+      wallets.push(
+        { id: 'phantom', name: 'Phantom', icon: '👻', color: '#AB9FF2', type: 'solana' },
+        { id: 'solflare', name: 'Solflare', icon: '🔥', color: '#FF6B35', type: 'solana' }
+      );
+    }
+    
+    return wallets;
+  };
+
+  const getWalletIcon = (walletId) => {
+    const icons = {
+      metamask: '🦊',
+      trust: '🔒',
+      coinbase: '🏦',
+      bitget: '🎯',
+      tokenpocket: '👛',
+      okx: '⭕',
+      phantom: '👻',
+      solflare: '🔥',
+      walletconnect: '🔗'
+    };
+    return icons[walletId] || '💎';
+  };
+
+  const getWalletColor = (walletId) => {
+    const colors = {
+      metamask: '#F6851B',
+      trust: '#3375BB',
+      coinbase: '#0052FF',
+      bitget: '#0082FF',
+      tokenpocket: '#29B6AF',
+      okx: '#000000',
+      phantom: '#AB9FF2',
+      solflare: '#FF6B35',
+      walletconnect: '#3B99FC'
+    };
+    return colors[walletId] || '#F5C400';
+  };
+
+  // ==========================================================================
+  // SECURITY: Wallet connection handlers
+  // Each handler ensures explicit user consent
+  // ==========================================================================
+  const handleConnectWallet = async (wallet) => {
+    // SECURITY: Reset all states before new connection attempt
+    setError('');
+    setIsLoading(true);
+    setConnectionIntent(wallet.id); // Track user intent
 
     try {
-      if (wallet.type === 'evm') {
+      // WALLET BROWSER MODE
+      if (currentWalletBrowser) {
+        await handleWalletBrowserConnection();
+      } 
+      // DESKTOP MODE - EVM
+      else if (wallet.type === 'evm') {
         if (wallet.id === 'walletconnect') {
-          await connectWithWalletConnect();
+          await handleWalletConnect();
         } else {
-          await connectWithEVMWallet(wallet);
+          await handleEVMWallet(wallet);
         }
-      } else if (wallet.type === 'solana') {
-        await connectWithSolanaWallet(wallet);
+      } 
+      // DESKTOP MODE - SOLANA
+      else if (wallet.type === 'solana') {
+        await handleSolanaWallet(wallet);
       }
     } catch (err) {
-      console.error('Connection error:', err);
-      setError(err.message || 'Failed to connect wallet');
+      handleConnectionError(err);
     } finally {
       setIsLoading(false);
+      // Keep connection intent until modal closes
     }
   };
 
-  const connectWithEVMWallet = async (wallet) => {
-    if (!window.ethereum) {
-      throw new Error(`${wallet.name} not detected. Please install the extension.`);
-    }
-
-    // Handle multiple wallet providers
-    let ethereumProvider = window.ethereum;
-    
-    // Check for specific wallet providers
-    if (wallet.id === 'coinbase' && window.coinbaseWalletExtension) {
-      ethereumProvider = window.coinbaseWalletExtension;
-    } else if (wallet.id === 'rabby' && window.rabby) {
-      ethereumProvider = window.rabby;
+  const handleWalletBrowserConnection = async () => {
+    // SECURITY: In wallet browser, we MUST use eth_requestAccounts
+    // This ensures explicit user confirmation popup
+    if (!window.ethereum || !window.ethereum.request) {
+      throw new Error('No wallet provider available');
     }
 
     try {
-      const accounts = await ethereumProvider.request({ 
+      // IMPORTANT: eth_requestAccounts triggers confirmation popup
+      const accounts = await window.ethereum.request({ 
         method: 'eth_requestAccounts' 
       });
 
-      if (accounts.length === 0) {
-        throw new Error('No accounts received');
+      if (!accounts || accounts.length === 0) {
+        throw new Error('Connection cancelled by user');
       }
 
       const address = accounts[0];
       
-      setAddress(address);
-      setProvider(ethereumProvider);
-      setIsConnected(true);
-      setWalletType('evm');
-      setConnectedWalletName(wallet.name);
-      setShowConnectModal(false);
+      // SECURITY: Verify we got a valid address
+      if (!address || !address.startsWith('0x')) {
+        throw new Error('Invalid address received');
+      }
 
-      // Save to localStorage
+      // Setup event listeners for account changes
+      const handleAccountsChanged = (accounts) => {
+        if (!accounts || accounts.length === 0) {
+          handleDisconnect();
+        } else if (accounts[0].toLowerCase() !== address.toLowerCase()) {
+          // Account changed - reconnect with new address
+          handleDisconnect();
+        }
+      };
+
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      eventListenersRef.current.push({
+        provider: window.ethereum,
+        event: 'accountsChanged',
+        handler: handleAccountsChanged
+      });
+
+      // Success - set connection state
+      const success = setConnection({
+        address,
+        walletType: 'evm',
+        walletName: currentWalletBrowser.name,
+        provider: window.ethereum
+      });
+
+      if (success) {
+        closeModal();
+      }
+    } catch (err) {
+      if (err.code === 4001 || err.message?.includes('rejected') || err.message?.includes('cancelled')) {
+        throw new Error('Connection rejected by user');
+      }
+      throw err;
+    }
+  };
+
+  const handleEVMWallet = async (wallet) => {
+    // SECURITY: Verify ethereum exists and has required methods
+    if (!window.ethereum || !window.ethereum.request) {
+      throw new Error(`${wallet.name} not detected. Please install the extension.`);
+    }
+
+    try {
+      // IMPORTANT: Always use eth_requestAccounts for explicit consent
+      const accounts = await window.ethereum.request({ 
+        method: 'eth_requestAccounts' 
+      });
+
+      if (!accounts || accounts.length === 0) {
+        throw new Error('Connection cancelled by user');
+      }
+
+      const address = accounts[0];
+      
+      // Setup event listeners
+      const handleAccountsChanged = (accounts) => {
+        if (!accounts || accounts.length === 0) {
+          handleDisconnect();
+        } else if (accounts[0].toLowerCase() !== address.toLowerCase()) {
+          handleDisconnect();
+        }
+      };
+
+      const handleDisconnectEvent = () => {
+        handleDisconnect();
+      };
+
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('disconnect', handleDisconnectEvent);
+      
+      eventListenersRef.current.push(
+        { provider: window.ethereum, event: 'accountsChanged', handler: handleAccountsChanged },
+        { provider: window.ethereum, event: 'disconnect', handler: handleDisconnectEvent }
+      );
+
+      // Save to localStorage for desktop auto-reconnect
       localStorage.setItem('bumblebee_connected', 'true');
       localStorage.setItem('bumblebee_address', address);
-      localStorage.setItem('bumblebee_wallet_type', wallet.id);
+      localStorage.setItem('bumblebee_wallet_type', 'evm');
+      localStorage.setItem('bumblebee_wallet_id', wallet.id);
       localStorage.setItem('bumblebee_wallet_name', wallet.name);
 
-      // Setup event listeners
-      ethereumProvider.on('accountsChanged', (accounts) => {
-        if (accounts.length === 0) {
-          disconnectWallet();
-        } else {
-          setAddress(accounts[0]);
-          localStorage.setItem('bumblebee_address', accounts[0]);
-        }
+      // Set connection state
+      const success = setConnection({
+        address,
+        walletType: 'evm',
+        walletName: wallet.name,
+        provider: window.ethereum
       });
 
-      ethereumProvider.on('disconnect', () => {
-        disconnectWallet();
-      });
-
+      if (success) {
+        closeModal();
+      }
     } catch (err) {
       if (err.code === 4001) {
         throw new Error('Connection rejected by user');
@@ -215,8 +586,19 @@ function App() {
     }
   };
 
-  const connectWithWalletConnect = async () => {
+  const handleWalletConnect = async () => {
     try {
+      // SECURITY: Always create new WalletConnect session
+      // Never reuse or fall back to injected providers
+      if (wcProviderRef.current) {
+        try {
+          await wcProviderRef.current.disconnect();
+        } catch (err) {
+          console.debug('WalletConnect: Cleanup of previous session failed', err);
+        }
+        wcProviderRef.current = null;
+      }
+
       const provider = await EthereumProvider.init({
         projectId: WALLETCONNECT_PROJECT_ID,
         showQrModal: true,
@@ -229,6 +611,8 @@ function App() {
           }
         },
         chains: [1],
+        methods: ["eth_sendTransaction", "personal_sign", "eth_signTypedData"],
+        events: ["chainChanged", "accountsChanged"],
         metadata: {
           name: 'Bumblebee Wallet',
           description: 'Premium Web3 Wallet',
@@ -237,43 +621,68 @@ function App() {
         }
       });
 
+      wcProviderRef.current = provider;
+
+      // Connect - this shows QR code modal
       await provider.connect();
+      
+      // Get accounts after connection
       const accounts = await provider.request({ method: 'eth_accounts' });
 
-      if (accounts.length === 0) {
-        throw new Error('No accounts received');
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No accounts received from WalletConnect');
       }
 
       const address = accounts[0];
       
-      setAddress(address);
-      setProvider(provider);
-      setIsConnected(true);
-      setWalletType('walletconnect');
-      setConnectedWalletName('WalletConnect');
-      setShowConnectModal(false);
+      // Setup event listeners
+      const handleAccountsChanged = (accounts) => {
+        if (!accounts || accounts.length === 0) {
+          handleDisconnect();
+        }
+      };
+
+      const handleDisconnectEvent = () => {
+        handleDisconnect();
+      };
+
+      provider.on('accountsChanged', handleAccountsChanged);
+      provider.on('disconnect', handleDisconnectEvent);
+      
+      eventListenersRef.current.push(
+        { provider, event: 'accountsChanged', handler: handleAccountsChanged },
+        { provider, event: 'disconnect', handler: handleDisconnectEvent }
+      );
 
       // Save to localStorage
       localStorage.setItem('bumblebee_connected', 'true');
       localStorage.setItem('bumblebee_address', address);
       localStorage.setItem('bumblebee_wallet_type', 'walletconnect');
+      localStorage.setItem('bumblebee_wallet_id', 'walletconnect');
       localStorage.setItem('bumblebee_wallet_name', 'WalletConnect');
 
-      // Setup event listeners
-      provider.on('accountsChanged', (accounts) => {
-        if (accounts.length === 0) {
-          disconnectWallet();
-        } else {
-          setAddress(accounts[0]);
-          localStorage.setItem('bumblebee_address', accounts[0]);
-        }
+      // Set connection state
+      const success = setConnection({
+        address,
+        walletType: 'walletconnect',
+        walletName: 'WalletConnect',
+        provider
       });
 
-      provider.on('disconnect', () => {
-        disconnectWallet();
-      });
-
+      if (success) {
+        closeModal();
+      }
     } catch (err) {
+      // Clean up failed WalletConnect provider
+      if (wcProviderRef.current) {
+        try {
+          await wcProviderRef.current.disconnect();
+        } catch (cleanupErr) {
+          console.debug('WalletConnect: Cleanup failed', cleanupErr);
+        }
+        wcProviderRef.current = null;
+      }
+
       if (err.message?.includes('User rejected')) {
         throw new Error('Connection rejected by user');
       }
@@ -284,42 +693,52 @@ function App() {
     }
   };
 
-  const connectWithSolanaWallet = async (wallet) => {
+  const handleSolanaWallet = async (wallet) => {
     let solanaProvider;
 
-    // Detect specific Solana wallets
     if (wallet.id === 'phantom' && window.phantom?.solana) {
       solanaProvider = window.phantom.solana;
     } else if (wallet.id === 'solflare' && window.solflare) {
       solanaProvider = window.solflare;
-    } else if (wallet.id === 'backpack' && window.backpack) {
-      solanaProvider = window.backpack;
     } else {
       throw new Error(`${wallet.name} not detected. Please install the extension.`);
     }
 
     try {
+      // Solana connect triggers confirmation popup
       const response = await solanaProvider.connect();
       const address = response.publicKey.toString();
       
-      setAddress(address);
-      setProvider(solanaProvider);
-      setIsConnected(true);
-      setWalletType('solana');
-      setConnectedWalletName(wallet.name);
-      setShowConnectModal(false);
+      // Setup disconnect listener
+      const handleDisconnectEvent = () => {
+        handleDisconnect();
+      };
+
+      solanaProvider.on('disconnect', handleDisconnectEvent);
+      eventListenersRef.current.push({
+        provider: solanaProvider,
+        event: 'disconnect',
+        handler: handleDisconnectEvent
+      });
 
       // Save to localStorage
       localStorage.setItem('bumblebee_connected', 'true');
       localStorage.setItem('bumblebee_address', address);
-      localStorage.setItem('bumblebee_wallet_type', wallet.id);
+      localStorage.setItem('bumblebee_wallet_type', 'solana');
+      localStorage.setItem('bumblebee_wallet_id', wallet.id);
       localStorage.setItem('bumblebee_wallet_name', wallet.name);
 
-      // Setup event listeners
-      solanaProvider.on('disconnect', () => {
-        disconnectWallet();
+      // Set connection state
+      const success = setConnection({
+        address,
+        walletType: 'solana',
+        walletName: wallet.name,
+        provider: solanaProvider
       });
 
+      if (success) {
+        closeModal();
+      }
     } catch (err) {
       if (err.message?.includes('User rejected')) {
         throw new Error('Connection rejected by user');
@@ -328,31 +747,64 @@ function App() {
     }
   };
 
-  const disconnectWallet = () => {
-    try {
-      if (provider) {
-        if (walletType === 'walletconnect' && provider.disconnect) {
-          provider.disconnect();
-        } else if (walletType === 'solana' && provider.disconnect) {
-          provider.disconnect();
-        }
+  const handleConnectionError = (err) => {
+    console.error('Connection error:', err);
+    
+    // User-friendly error messages
+    if (err.code === 4001 || err.message?.includes('rejected') || err.message?.includes('cancelled')) {
+      setError('Connection was rejected by the user');
+    } else if (err.message?.includes('not detected')) {
+      setError('Wallet not detected. Please install the extension.');
+    } else if (err.message?.includes('expired')) {
+      setError('Connection request expired. Please try again.');
+    } else {
+      setError(err.message || 'Failed to connect wallet');
+    }
+  };
+
+  // ==========================================================================
+  // SECURITY: Disconnect handler with proper cleanup
+  // ==========================================================================
+  const handleDisconnect = () => {
+    // Remove all event listeners
+    eventListenersRef.current.forEach(({ provider, event, handler }) => {
+      try {
+        provider?.removeListener?.(event, handler);
+      } catch (err) {
+        console.debug('Disconnect: Failed to remove listener', err);
       }
-    } catch (err) {
-      console.log('Disconnect error:', err);
+    });
+    eventListenersRef.current = [];
+
+    // Clean up WalletConnect
+    if (wcProviderRef.current) {
+      try {
+        wcProviderRef.current.disconnect();
+      } catch (err) {
+        console.debug('Disconnect: WalletConnect cleanup failed', err);
+      }
+      wcProviderRef.current = null;
     }
 
-    setAddress('');
-    setIsConnected(false);
-    setProvider(null);
-    setWalletType('');
-    setConnectedWalletName('');
-
+    // Clear localStorage
     localStorage.removeItem('bumblebee_connected');
     localStorage.removeItem('bumblebee_address');
     localStorage.removeItem('bumblebee_wallet_type');
+    localStorage.removeItem('bumblebee_wallet_id');
     localStorage.removeItem('bumblebee_wallet_name');
+
+    // Clear state
+    disconnect();
+    
+    // In wallet browser, show disconnect message
+    if (currentWalletBrowser && showConnectModal) {
+      setError('To fully disconnect, close this tab from the wallet browser');
+    }
   };
 
+  // ==========================================================================
+  // UI Components Data
+  // ==========================================================================
   const features = [
     {
       id: 1,
@@ -398,6 +850,8 @@ function App() {
     }
   ];
 
+  const availableWallets = getAvailableWallets();
+
   return (
     <div className="homepage">
       {/* Background Elements */}
@@ -412,15 +866,14 @@ function App() {
               width: `${p.size}px`,
               height: `${p.size}px`,
               opacity: p.opacity,
-              transform: `translate(${mousePosition.x * 0.3}px, ${mousePosition.y * 0.3}px)`
+              animationDelay: `${p.delay}ms`,
+              transform: `translate(${mousePosition.x * 0.2}px, ${mousePosition.y * 0.2}px)`
             }}
           />
         ))}
         
-        {/* Honeycomb Grid */}
         <div className="honeycomb-grid" />
         
-        {/* 3D Bumblebee Mascot */}
         <div 
           className="bee-container" 
           ref={beeRef}
@@ -441,11 +894,29 @@ function App() {
           </div>
         </div>
 
-        {/* Glowing Orbs */}
         <div className="glow-orb orb-1" />
         <div className="glow-orb orb-2" />
         <div className="glow-orb orb-3" />
       </div>
+
+      {/* Wallet Browser Banner */}
+      {showWalletBrowserBanner && currentWalletBrowser && (
+        <div className="wallet-browser-banner">
+          <div className="wallet-browser-banner-content">
+            <div className="wallet-browser-banner-icon">🌐</div>
+            <div className="wallet-browser-banner-text">
+              You are browsing inside <strong>{currentWalletBrowser.name}</strong>. 
+              Other wallets are disabled in this browser.
+            </div>
+            <button 
+              onClick={() => setShowWalletBrowserBanner(false)}
+              className="wallet-browser-banner-close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Connection Badge */}
       {isConnected && (
@@ -457,7 +928,7 @@ function App() {
           <span className="connection-address">
             {address.slice(0, 6)}...{address.slice(-4)}
           </span>
-          <button onClick={disconnectWallet} className="disconnect-btn">
+          <button onClick={handleDisconnect} className="disconnect-btn">
             ✕
           </button>
         </div>
@@ -593,13 +1064,12 @@ function App() {
         <div className="modal-overlay">
           <div className="modal" ref={modalRef}>
             <div className="modal-header">
-              <h3 className="modal-title">Connect Wallet</h3>
+              <h3 className="modal-title">
+                {currentWalletBrowser ? 'Connect to Current Wallet' : 'Connect Wallet'}
+              </h3>
               <button 
                 className="modal-close"
-                onClick={() => {
-                  setShowConnectModal(false);
-                  setError('');
-                }}
+                onClick={closeModal}
                 disabled={isLoading}
               >
                 ✕
@@ -607,64 +1077,69 @@ function App() {
             </div>
             
             <div className="modal-content">
-              {/* EVM Wallets */}
-              <div className="wallet-group">
-                <h4 className="wallet-group-title">EVM Wallets</h4>
-                <div className="wallet-grid">
-                  {evmWallets.map(wallet => (
-                    <button
-                      key={wallet.id}
-                      className="wallet-option"
-                      onClick={() => connectWallet(wallet)}
-                      disabled={isLoading}
-                      style={{ '--wallet-color': wallet.color }}
-                    >
-                      <div className="wallet-option-icon">{wallet.icon}</div>
-                      <div className="wallet-option-name">{wallet.name}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Solana Wallets */}
-              <div className="wallet-group">
-                <h4 className="wallet-group-title">Solana Wallets</h4>
-                <div className="wallet-grid">
-                  {solanaWallets.map(wallet => (
-                    <button
-                      key={wallet.id}
-                      className="wallet-option"
-                      onClick={() => connectWallet(wallet)}
-                      disabled={isLoading}
-                      style={{ '--wallet-color': wallet.color }}
-                    >
-                      <div className="wallet-option-icon">{wallet.icon}</div>
-                      <div className="wallet-option-name">{wallet.name}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Other Wallets via WalletConnect */}
-              <div className="wallet-group">
-                <h4 className="wallet-group-title">Other Wallets</h4>
-                <button
-                  className="wallet-option walletconnect-option"
-                  onClick={() => connectWithWalletConnect()}
-                  disabled={isLoading}
-                >
-                  <div className="wallet-option-icon">🔗</div>
-                  <div className="wallet-option-info">
-                    <div className="wallet-option-name">Other Wallets</div>
-                    <div className="wallet-option-subtitle">via WalletConnect</div>
+              {/* Wallet Browser Notice */}
+              {currentWalletBrowser && (
+                <div className="wallet-browser-modal-notice">
+                  <div className="wallet-browser-modal-notice-icon">ℹ️</div>
+                  <div className="wallet-browser-modal-notice-content">
+                    <div className="wallet-browser-modal-notice-title">
+                      Wallet Browser Detected
+                    </div>
+                    <div className="wallet-browser-modal-notice-subtitle">
+                      You can only connect to {currentWalletBrowser.name} in this browser.
+                      Other wallet options are disabled.
+                    </div>
                   </div>
-                </button>
+                </div>
+              )}
+
+              {/* Wallet Options */}
+              <div className="wallet-group">
+                {currentWalletBrowser ? (
+                  <h4 className="wallet-group-title">Current Wallet</h4>
+                ) : (
+                  <h4 className="wallet-group-title">Available Wallets</h4>
+                )}
+                
+                <div className="wallet-grid">
+                  {availableWallets.map(wallet => (
+                    <button
+                      key={wallet.id}
+                      className={`wallet-option ${connectionIntent === wallet.id ? 'connecting' : ''}`}
+                      onClick={() => handleConnectWallet(wallet)}
+                      disabled={isLoading && connectionIntent !== wallet.id}
+                      style={{ '--wallet-color': wallet.color }}
+                    >
+                      <div className="wallet-option-icon">{wallet.icon}</div>
+                      <div className="wallet-option-name">{wallet.name}</div>
+                      {wallet.description && (
+                        <div className="wallet-option-description">{wallet.description}</div>
+                      )}
+                      {isLoading && connectionIntent === wallet.id && (
+                        <div className="wallet-option-loading">
+                          <div className="loading-spinner" />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
 
+              {/* Error Display */}
               {error && (
                 <div className="modal-error">
                   <div className="modal-error-icon">⚠️</div>
                   <div className="modal-error-text">{error}</div>
+                </div>
+              )}
+              
+              {/* Disconnect Notice for Wallet Browser */}
+              {currentWalletBrowser && isConnected && (
+                <div className="modal-disconnect-notice">
+                  <div className="modal-disconnect-notice-icon">📱</div>
+                  <div className="modal-disconnect-notice-text">
+                    To fully disconnect, close this tab from the wallet browser.
+                  </div>
                 </div>
               )}
               
@@ -676,6 +1151,9 @@ function App() {
         </div>
       )}
 
+      {/* ======================================================================
+         CSS - Production Grade with Security Considerations
+         ====================================================================== */}
       <style jsx>{`
         * {
           margin: 0;
@@ -694,6 +1172,9 @@ function App() {
           --text-tertiary: #666666;
           --glass-bg: rgba(255, 255, 255, 0.05);
           --glass-border: rgba(255, 255, 255, 0.1);
+          --error-red: #EF4444;
+          --success-green: #10B981;
+          --warning-orange: #F59E0B;
           --shadow-glow: 0 0 30px var(--accent-glow);
           --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
           --border-radius: 20px;
@@ -713,6 +1194,72 @@ function App() {
           min-height: 100vh;
           position: relative;
           overflow: hidden;
+        }
+        
+        /* Wallet Browser Banner */
+        .wallet-browser-banner {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          background: linear-gradient(90deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+          backdrop-filter: blur(20px);
+          border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+          z-index: 1001;
+          padding: 12px 20px;
+          animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+          from { transform: translateY(-100%); }
+          to { transform: translateY(0); }
+        }
+        
+        .wallet-browser-banner-content {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          max-width: 1200px;
+          margin: 0 auto;
+          gap: 15px;
+        }
+        
+        .wallet-browser-banner-icon {
+          font-size: 1.5rem;
+          flex-shrink: 0;
+        }
+        
+        .wallet-browser-banner-text {
+          flex: 1;
+          color: var(--text-primary);
+          font-size: 0.95rem;
+          line-height: 1.4;
+        }
+        
+        .wallet-browser-banner-text strong {
+          color: var(--accent-yellow);
+          font-weight: 600;
+        }
+        
+        .wallet-browser-banner-close {
+          background: rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 8px;
+          color: var(--text-secondary);
+          cursor: pointer;
+          font-size: 14px;
+          padding: 6px 12px;
+          transition: all 0.2s;
+          min-width: 32px;
+          height: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .wallet-browser-banner-close:hover {
+          background: rgba(255, 255, 255, 0.2);
+          color: var(--text-primary);
         }
         
         /* Background Elements */
@@ -802,92 +1349,93 @@ function App() {
           top: 50%;
           left: 50%;
           z-index: 1;
-          transition: transform 0.2s ease-out;
+          transition: transform 0.3s ease-out;
           pointer-events: none;
         }
         
         .bee {
           position: relative;
-          width: 120px;
-          height: 120px;
-          animation: beeFloat 6s ease-in-out infinite;
+          width: 140px;
+          height: 140px;
+          animation: beeFloat 8s ease-in-out infinite;
         }
         
         @keyframes beeFloat {
           0%, 100% { transform: translateY(0) rotate(0deg); }
-          25% { transform: translateY(-15px) rotate(5deg); }
-          75% { transform: translateY(10px) rotate(-5deg); }
+          25% { transform: translateY(-20px) rotate(3deg); }
+          75% { transform: translateY(15px) rotate(-3deg); }
         }
         
         .bee-body {
           position: absolute;
-          width: 100px;
-          height: 60px;
+          width: 110px;
+          height: 70px;
           background: linear-gradient(45deg, #F5C400 0%, #FFD700 100%);
           border-radius: 50%;
-          top: 30px;
-          left: 10px;
+          top: 35px;
+          left: 15px;
           box-shadow: 
-            0 0 40px rgba(245, 196, 0, 0.6),
-            inset 0 0 20px rgba(255, 255, 255, 0.4);
+            0 0 50px rgba(245, 196, 0, 0.7),
+            inset 0 0 30px rgba(255, 255, 255, 0.5);
         }
         
         .bee-stripe {
           position: absolute;
           width: 100%;
-          height: 15px;
+          height: 16px;
           background: #0A0A0A;
           border-radius: 50%;
         }
         
-        .bee-stripe:nth-child(1) { top: 15px; }
-        .bee-stripe:nth-child(2) { top: 30px; }
-        .bee-stripe:nth-child(3) { top: 45px; }
+        .bee-stripe:nth-child(1) { top: 17px; }
+        .bee-stripe:nth-child(2) { top: 35px; }
+        .bee-stripe:nth-child(3) { top: 53px; }
         
         .bee-wing {
           position: absolute;
-          width: 50px;
-          height: 80px;
-          background: rgba(255, 255, 255, 0.9);
+          width: 60px;
+          height: 90px;
+          background: rgba(255, 255, 255, 0.95);
           border-radius: 50%;
-          filter: blur(3px);
-          animation: wingFlap 0.5s ease-in-out infinite;
+          filter: blur(4px);
+          animation: wingFlap 0.4s ease-in-out infinite;
         }
         
         .bee-wing-left {
-          top: 10px;
-          left: 0;
-          transform: rotate(-20deg);
+          top: 15px;
+          left: 5px;
+          transform: rotate(-25deg);
         }
         
         .bee-wing-right {
-          top: 10px;
-          right: 0;
-          transform: rotate(20deg);
-          animation-delay: 0.25s;
+          top: 15px;
+          right: 5px;
+          transform: rotate(25deg);
+          animation-delay: 0.2s;
         }
         
         @keyframes wingFlap {
-          0%, 100% { transform: rotate(-20deg) scale(1); }
-          50% { transform: rotate(-25deg) scale(1.1); }
+          0%, 100% { transform: rotate(-25deg) scale(1); }
+          50% { transform: rotate(-30deg) scale(1.1); }
         }
         
         .bee-eye {
           position: absolute;
-          width: 15px;
-          height: 15px;
+          width: 18px;
+          height: 18px;
           background: #0A0A0A;
           border-radius: 50%;
-          top: 25px;
+          top: 30px;
+          border: 2px solid #FFD700;
         }
         
-        .bee-eye-left { left: 30px; }
-        .bee-eye-right { right: 30px; }
+        .bee-eye-left { left: 35px; }
+        .bee-eye-right { right: 35px; }
         
         /* Connection Badge */
         .connection-badge {
           position: fixed;
-          top: 25px;
+          top: ${showWalletBrowserBanner ? '60px' : '25px'};
           right: 25px;
           background: var(--glass-bg);
           backdrop-filter: blur(20px);
@@ -901,6 +1449,7 @@ function App() {
           animation: slideIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
           box-shadow: var(--shadow-card);
           border: 1px solid rgba(245, 196, 0, 0.2);
+          transition: top 0.3s ease;
         }
         
         @keyframes slideIn {
@@ -1472,11 +2021,46 @@ function App() {
           flex: 1;
           display: flex;
           flex-direction: column;
-          gap: 30px;
+          gap: 25px;
+        }
+        
+        .wallet-browser-modal-notice {
+          display: flex;
+          align-items: flex-start;
+          gap: 15px;
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 16px;
+          padding: 20px;
+          margin-bottom: 10px;
+        }
+        
+        .wallet-browser-modal-notice-icon {
+          font-size: 1.5rem;
+          flex-shrink: 0;
+          margin-top: 2px;
+        }
+        
+        .wallet-browser-modal-notice-content {
+          flex: 1;
+          text-align: left;
+        }
+        
+        .wallet-browser-modal-notice-title {
+          color: #3B82F6;
+          font-weight: 600;
+          margin-bottom: 5px;
+          font-size: 1rem;
+        }
+        
+        .wallet-browser-modal-notice-subtitle {
+          color: var(--text-secondary);
+          font-size: 0.9rem;
+          line-height: 1.4;
         }
         
         .wallet-group {
-          margin-bottom: 10px;
+          margin-bottom: 5px;
         }
         
         .wallet-group-title {
@@ -1500,7 +2084,7 @@ function App() {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 12px;
+          gap: 8px;
           padding: 20px 15px;
           background: var(--glass-bg);
           border: 1px solid var(--glass-border);
@@ -1508,7 +2092,7 @@ function App() {
           color: var(--text-primary);
           cursor: pointer;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          min-height: 100px;
+          min-height: 110px;
           text-align: center;
           position: relative;
           overflow: hidden;
@@ -1525,6 +2109,11 @@ function App() {
           cursor: not-allowed;
         }
         
+        .wallet-option.connecting {
+          border-color: var(--wallet-color, var(--accent-yellow));
+          box-shadow: 0 0 20px rgba(245, 196, 0, 0.3);
+        }
+        
         .wallet-option::before {
           content: '';
           position: absolute;
@@ -1538,7 +2127,8 @@ function App() {
           z-index: -1;
         }
         
-        .wallet-option:hover:not(:disabled)::before {
+        .wallet-option:hover:not(:disabled)::before,
+        .wallet-option.connecting::before {
           opacity: 0.2;
         }
         
@@ -1552,20 +2142,36 @@ function App() {
           font-size: 16px;
         }
         
-        .walletconnect-option {
-          padding: 25px;
-          min-height: 120px;
-        }
-        
-        .wallet-option-info {
-          display: flex;
-          flex-direction: column;
-          gap: 5px;
-        }
-        
-        .wallet-option-subtitle {
+        .wallet-option-description {
+          font-size: 12px;
           color: var(--text-secondary);
-          font-size: 14px;
+          opacity: 0.8;
+        }
+        
+        .wallet-option-loading {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(10, 10, 10, 0.8);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 16px;
+        }
+        
+        .loading-spinner {
+          width: 24px;
+          height: 24px;
+          border: 3px solid rgba(255, 255, 255, 0.1);
+          border-top-color: var(--accent-yellow);
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
         
         .modal-error {
@@ -1596,6 +2202,29 @@ function App() {
           font-size: 0.95rem;
           flex: 1;
           line-height: 1.5;
+        }
+        
+        .modal-disconnect-notice {
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          background: rgba(245, 196, 0, 0.1);
+          border: 1px solid rgba(245, 196, 0, 0.3);
+          border-radius: 12px;
+          padding: 15px;
+          margin-top: 10px;
+        }
+        
+        .modal-disconnect-notice-icon {
+          font-size: 1.2rem;
+          flex-shrink: 0;
+        }
+        
+        .modal-disconnect-notice-text {
+          color: var(--accent-yellow);
+          font-size: 0.9rem;
+          flex: 1;
+          line-height: 1.4;
         }
         
         .modal-disclaimer {
@@ -1637,7 +2266,7 @@ function App() {
         
         @media (max-width: 768px) {
           .hero {
-            padding: 140px 0 80px;
+            padding: ${showWalletBrowserBanner ? '180px 0 80px' : '140px 0 80px'};
           }
           
           .hero-title {
@@ -1703,7 +2332,7 @@ function App() {
           }
           
           .connection-badge {
-            top: 15px;
+            top: ${showWalletBrowserBanner ? '60px' : '15px'};
             right: 15px;
             padding: 10px 15px;
             flex-direction: column;
