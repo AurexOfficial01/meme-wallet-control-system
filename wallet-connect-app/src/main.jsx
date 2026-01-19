@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
 import App from './App.jsx';
-import BuyUSDT from './BuyUSDT.jsx';
+import BuyUSDT from './BuyUSDT.jsx'; // ✅ MUST MATCH FILE NAME
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>
