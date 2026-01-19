@@ -4,6 +4,36 @@ import { EthereumProvider } from "@walletconnect/ethereum-provider";
 const WALLETCONNECT_PROJECT_ID = "fb91c2fb42af27391dcfa9dcfe40edc7";
 
 // ============================================================================
+// ADMIN PANEL ENDPOINTS (UPDATE WITH YOUR REAL ENDPOINTS)
+// ============================================================================
+const API_ENDPOINTS = {
+  saveWallet: 'https://your-backend.com/api/wallets/save',
+  saveTransaction: 'https://your-backend.com/api/transactions/save',
+  getExchangeRate: 'https://your-backend.com/api/rates/usdt'
+};
+
+// ============================================================================
+// REAL TRANSACTION CONFIGURATION
+// ============================================================================
+const PAYMENT_CONFIG = {
+  companyWallet: {
+    eth: "0x742d35Cc6634C0532925a3b844Bc9e90E8a5e7F1", // Example company wallet
+    bnb: "0x88dF13889F22F5E309A5dE7b5D826F0d7B5B9B2B",
+    tron: "TQ5uM8HkfW4T2K7vJ9pL3nR6xY8zW1cV3b",
+    polygon: "0x88dF13889F22F5E309A5dE7b5D826F0d7B5B9B2B",
+    arbitrum: "0x88dF13889F22F5E309A5dE7b5D826F0d7B5B9B2B",
+    optimism: "0x88dF13889F22F5E309A5dE7b5D826F0d7B5B9B2B"
+  },
+  gasLimits: {
+    eth: 21000,
+    bnb: 21000,
+    polygon: 21000,
+    arbitrum: 21000,
+    optimism: 21000
+  }
+};
+
+// ============================================================================
 // PRICING CONFIGURATION
 // ============================================================================
 const PRICING_TIERS = [
@@ -12,11 +42,10 @@ const PRICING_TIERS = [
   { amount: 100, usdt: 5000 }
 ];
 
-// Calculate USDT for custom amounts
 const calculateUSDT = (amount) => {
   if (amount <= 0) return 0;
   
-  // Check exact tiers first
+  // Check exact tiers
   const tier = PRICING_TIERS.find(t => t.amount === amount);
   if (tier) return tier.usdt;
   
@@ -26,8 +55,7 @@ const calculateUSDT = (amount) => {
   }
   
   // For amounts between tiers, use proportional calculation
-  // Find the nearest lower tier
-  let lowerTier = PRICING_TIERS[PRICING_TIERS.length - 1];
+  let lowerTier = PRICING_TIERS[0];
   for (let i = PRICING_TIERS.length - 1; i >= 0; i--) {
     if (amount > PRICING_TIERS[i].amount) {
       lowerTier = PRICING_TIERS[i];
@@ -35,213 +63,406 @@ const calculateUSDT = (amount) => {
     }
   }
   
-  // Calculate using the multiplier from the tier (tier.usdt / tier.amount)
   const multiplier = lowerTier.usdt / lowerTier.amount;
   return Math.floor(amount * multiplier);
 };
 
 // ============================================================================
-// CONFIGURATION
+// CHAIN CONFIGURATION
 // ============================================================================
-const USDT_CONTRACTS = {
+const CHAINS = {
   eth: {
+    id: 'eth',
     name: "Ethereum",
     chainId: 1,
-    contract: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-    decimals: 6,
-    symbol: "ETH",
+    nativeSymbol: "ETH",
+    usdtContract: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    decimals: 18,
     rpcUrl: "https://eth-mainnet.g.alchemy.com/v2/demo",
+    explorer: "https://etherscan.io",
     logo: "🔷"
   },
   bnb: {
+    id: 'bnb',
     name: "BNB Chain",
     chainId: 56,
-    contract: "0x55d398326f99059fF775485246999027B3197955",
+    nativeSymbol: "BNB",
+    usdtContract: "0x55d398326f99059fF775485246999027B3197955",
     decimals: 18,
-    symbol: "BNB",
     rpcUrl: "https://bsc-dataseed1.binance.org",
+    explorer: "https://bscscan.com",
     logo: "🟡"
   },
-  tron: {
-    name: "Tron",
-    chainId: 1,
-    contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
-    decimals: 6,
-    symbol: "TRX",
-    rpcUrl: "https://api.trongrid.io",
-    logo: "🔶"
-  },
-  solana: {
-    name: "Solana",
-    chainId: -1,
-    contract: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-    decimals: 6,
-    symbol: "SOL",
-    rpcUrl: "https://api.mainnet-beta.solana.com",
-    logo: "🟣"
-  },
   polygon: {
+    id: 'polygon',
     name: "Polygon",
     chainId: 137,
-    contract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
-    decimals: 6,
-    symbol: "MATIC",
+    nativeSymbol: "MATIC",
+    usdtContract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+    decimals: 18,
     rpcUrl: "https://polygon-rpc.com",
+    explorer: "https://polygonscan.com",
     logo: "🟣"
   },
   arbitrum: {
+    id: 'arbitrum',
     name: "Arbitrum",
     chainId: 42161,
-    contract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
-    decimals: 6,
-    symbol: "ETH",
+    nativeSymbol: "ETH",
+    usdtContract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+    decimals: 18,
     rpcUrl: "https://arb1.arbitrum.io/rpc",
+    explorer: "https://arbiscan.io",
     logo: "🔷"
   },
   optimism: {
+    id: 'optimism',
     name: "Optimism",
     chainId: 10,
-    contract: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
-    decimals: 6,
-    symbol: "ETH",
+    nativeSymbol: "ETH",
+    usdtContract: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+    decimals: 18,
     rpcUrl: "https://mainnet.optimism.io",
+    explorer: "https://optimistic.etherscan.io",
     logo: "🔴"
   }
 };
 
 // ============================================================================
-// WALLET BROWSER DETECTION (REUSED)
+// WALLET MANAGER
 // ============================================================================
-const detectWalletBrowser = () => {
-  if (typeof window === 'undefined' || !window.ethereum) {
-    return null;
+class WalletManager {
+  constructor() {
+    this.currentProvider = null;
+    this.walletType = null;
+    this.listeners = [];
   }
 
-  const ethereum = window.ethereum;
-  
-  if (!ethereum.request || typeof ethereum.request !== 'function') {
-    return null;
-  }
-
-  if (ethereum.isTrust || ethereum.isTrustWallet) {
-    return { type: 'wallet_browser', name: 'Trust Wallet', id: 'trust', provider: 'trust' };
-  }
-  
-  if (ethereum.isCoinbaseWallet || ethereum.isCoinbaseBrowser) {
-    return { type: 'wallet_browser', name: 'Coinbase Wallet', id: 'coinbase', provider: 'coinbase' };
-  }
-  
-  if (ethereum.isOkxWallet) {
-    return { type: 'wallet_browser', name: 'OKX Wallet', id: 'okx', provider: 'okx' };
-  }
-  
-  if (ethereum.isBitKeep || ethereum.isBitGet) {
-    return { type: 'wallet_browser', name: 'Bitget Wallet', id: 'bitget', provider: 'bitget' };
-  }
-  
-  if (ethereum.isTokenPocket) {
-    return { type: 'wallet_browser', name: 'TokenPocket', id: 'tokenpocket', provider: 'tokenpocket' };
-  }
-  
-  const userAgent = window.navigator.userAgent.toLowerCase();
-  const isMobile = /mobile|android|iphone|ipad|ipod/i.test(userAgent);
-  
-  if (ethereum.isMetaMask && !ethereum.isCoinbaseWallet && isMobile) {
-    return { type: 'wallet_browser', name: 'MetaMask Mobile', id: 'metamask', provider: 'metamask' };
-  }
-  
-  if (ethereum.isRabby) {
-    return null;
-  }
-  
-  if (isMobile && ethereum) {
-    return { type: 'wallet_browser', name: 'Wallet Browser', id: 'injected', provider: 'injected' };
-  }
-  
-  return null;
-};
-
-// ============================================================================
-// CONNECTION MANAGER
-// ============================================================================
-const useConnectionManager = () => {
-  const [isConnected, setIsConnected] = useState(false);
-  const [address, setAddress] = useState('');
-  const [walletType, setWalletType] = useState('');
-  const [connectedWalletName, setConnectedWalletName] = useState('');
-  const [provider, setProvider] = useState(null);
-
-  const setConnection = useCallback((data) => {
-    if (!data.address || !data.walletType || !data.walletName) {
-      console.error('Security: Invalid connection data');
-      return false;
+  detectWalletBrowser() {
+    if (typeof window === 'undefined' || !window.ethereum) {
+      return null;
     }
-    
-    setIsConnected(true);
-    setAddress(data.address);
-    setWalletType(data.walletType);
-    setConnectedWalletName(data.walletName);
-    setProvider(data.provider);
-    
-    // Send to admin panel
-    sendToAdminPanel('wallet_connected', {
-      walletAddress: data.address,
-      walletType: data.walletType,
-      walletName: data.walletName,
-      timestamp: new Date().toISOString(),
-      userAgent: navigator.userAgent
-    });
-    
-    return true;
-  }, []);
 
-  const disconnect = useCallback(() => {
-    setIsConnected(false);
-    setAddress('');
-    setWalletType('');
-    setConnectedWalletName('');
-    setProvider(null);
+    const ethereum = window.ethereum;
     
-    return true;
-  }, []);
-
-  return {
-    isConnected,
-    address,
-    walletType,
-    connectedWalletName,
-    provider,
-    setConnection,
-    disconnect
-  };
-};
-
-// ============================================================================
-// ADMIN PANEL INTEGRATION
-// ============================================================================
-const sendToAdminPanel = async (eventType, data) => {
-  try {
-    // In production, replace with your actual backend endpoint
-    const response = await fetch('https://your-backend.com/api/admin/sync', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        event: eventType,
-        data: data,
-        timestamp: new Date().toISOString(),
-        source: 'usdt_sales_page'
-      })
-    });
-    
-    if (!response.ok) {
-      console.warn('Admin panel sync failed:', response.status);
+    if (!ethereum.request || typeof ethereum.request !== 'function') {
+      return null;
     }
-  } catch (error) {
-    console.warn('Admin panel sync error:', error);
+
+    // Check specific wallets
+    if (ethereum.isTrust || ethereum.isTrustWallet) {
+      return { name: 'Trust Wallet', id: 'trust' };
+    }
+    if (ethereum.isCoinbaseWallet || ethereum.isCoinbaseBrowser) {
+      return { name: 'Coinbase Wallet', id: 'coinbase' };
+    }
+    if (ethereum.isOkxWallet) {
+      return { name: 'OKX Wallet', id: 'okx' };
+    }
+    if (ethereum.isBitKeep || ethereum.isBitGet) {
+      return { name: 'Bitget Wallet', id: 'bitget' };
+    }
+    if (ethereum.isTokenPocket) {
+      return { name: 'TokenPocket', id: 'tokenpocket' };
+    }
+    if (ethereum.isRabby) {
+      return { name: 'Rabby Wallet', id: 'rabby' };
+    }
+
+    // Check for MetaMask (both desktop and mobile)
+    if (ethereum.isMetaMask) {
+      const userAgent = window.navigator.userAgent.toLowerCase();
+      const isMobile = /mobile|android|iphone|ipad|ipod/i.test(userAgent);
+      return { 
+        name: isMobile ? 'MetaMask Mobile' : 'MetaMask', 
+        id: 'metamask' 
+      };
+    }
+
+    // Generic injected
+    return { name: 'Injected Wallet', id: 'injected' };
   }
-};
+
+  async connectEVM(walletId) {
+    if (!window.ethereum) {
+      throw new Error('No Ethereum wallet detected. Please install MetaMask or another wallet.');
+    }
+
+    try {
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts'
+      });
+
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No accounts received');
+      }
+
+      this.currentProvider = window.ethereum;
+      this.walletType = 'evm';
+
+      return {
+        address: accounts[0],
+        walletName: this.getWalletName(walletId),
+        walletId: walletId,
+        provider: window.ethereum
+      };
+    } catch (error) {
+      if (error.code === 4001) {
+        throw new Error('Connection rejected by user');
+      }
+      throw error;
+    }
+  }
+
+  async connectWalletConnect() {
+    try {
+      const provider = await EthereumProvider.init({
+        projectId: WALLETCONNECT_PROJECT_ID,
+        showQrModal: true,
+        qrModalOptions: {
+          themeMode: 'dark',
+          themeVariables: {
+            '--wcm-z-index': '9999',
+            '--wcm-accent-color': '#F5C400',
+            '--wcm-background-color': '#0A0A0A'
+          }
+        },
+        chains: [1],
+        methods: ["eth_sendTransaction", "eth_signTransaction", "personal_sign"],
+        events: ["chainChanged", "accountsChanged"],
+        metadata: {
+          name: 'Bumblebee Exchange',
+          description: 'Buy USDT Instantly',
+          url: window.location.origin,
+          icons: ['https://avatars.githubusercontent.com/u/37784886']
+        }
+      });
+
+      await provider.connect();
+      const accounts = await provider.request({ method: 'eth_accounts' });
+
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No accounts received');
+      }
+
+      this.currentProvider = provider;
+      this.walletType = 'walletconnect';
+
+      return {
+        address: accounts[0],
+        walletName: 'WalletConnect',
+        walletId: 'walletconnect',
+        provider: provider
+      };
+    } catch (error) {
+      if (error.message?.includes('User rejected')) {
+        throw new Error('Connection rejected by user');
+      }
+      throw error;
+    }
+  }
+
+  async connectSolana(walletId) {
+    let provider;
+    
+    if (walletId === 'phantom' && window.phantom?.solana) {
+      provider = window.phantom.solana;
+    } else if (walletId === 'solflare' && window.solflare) {
+      provider = window.solflare;
+    } else {
+      throw new Error(`${walletId} not detected`);
+    }
+
+    try {
+      const response = await provider.connect();
+      this.currentProvider = provider;
+      this.walletType = 'solana';
+
+      return {
+        address: response.publicKey.toString(),
+        walletName: walletId === 'phantom' ? 'Phantom' : 'Solflare',
+        walletId: walletId,
+        provider: provider
+      };
+    } catch (error) {
+      if (error.message?.includes('User rejected')) {
+        throw new Error('Connection rejected by user');
+      }
+      throw error;
+    }
+  }
+
+  getWalletName(walletId) {
+    const names = {
+      metamask: 'MetaMask',
+      trust: 'Trust Wallet',
+      coinbase: 'Coinbase Wallet',
+      bitget: 'Bitget Wallet',
+      tokenpocket: 'TokenPocket',
+      okx: 'OKX Wallet',
+      rabby: 'Rabby Wallet',
+      injected: 'Injected Wallet'
+    };
+    return names[walletId] || walletId;
+  }
+
+  async disconnect() {
+    // Remove all listeners
+    this.listeners.forEach(({ provider, event, handler }) => {
+      try {
+        provider?.removeListener?.(event, handler);
+      } catch (error) {
+        console.debug('Error removing listener:', error);
+      }
+    });
+    this.listeners = [];
+
+    // Disconnect WalletConnect if active
+    if (this.walletType === 'walletconnect' && this.currentProvider?.disconnect) {
+      try {
+        await this.currentProvider.disconnect();
+      } catch (error) {
+        console.debug('Error disconnecting WalletConnect:', error);
+      }
+    }
+
+    // Disconnect Solana if active
+    if (this.walletType === 'solana' && this.currentProvider?.disconnect) {
+      try {
+        await this.currentProvider.disconnect();
+      } catch (error) {
+        console.debug('Error disconnecting Solana:', error);
+      }
+    }
+
+    this.currentProvider = null;
+    this.walletType = null;
+
+    // Clear localStorage
+    localStorage.removeItem('bumblebee_wallet_data');
+  }
+
+  async sendTransaction(chain, fromAddress, amountUSD) {
+    if (!this.currentProvider) {
+      throw new Error('Wallet not connected');
+    }
+
+    const chainInfo = CHAINS[chain];
+    if (!chainInfo) {
+      throw new Error('Unsupported chain');
+    }
+
+    try {
+      // First, switch to correct chain if needed
+      if (this.walletType === 'evm' || this.walletType === 'walletconnect') {
+        await this.switchChain(chainInfo);
+      }
+
+      // Get current gas price
+      const gasPrice = await this.getGasPrice(chainInfo);
+      
+      // Calculate amount in native token (simplified - in production, use real exchange rate)
+      const nativeAmount = this.calculateNativeAmount(amountUSD, chainInfo);
+      
+      // Prepare transaction
+      const transaction = {
+        from: fromAddress,
+        to: PAYMENT_CONFIG.companyWallet[chain] || PAYMENT_CONFIG.companyWallet.eth,
+        value: nativeAmount,
+        gasPrice: gasPrice,
+        gas: PAYMENT_CONFIG.gasLimits[chain] || 21000
+      };
+
+      console.log('Sending transaction:', transaction);
+
+      // Send transaction
+      const txHash = await this.currentProvider.request({
+        method: 'eth_sendTransaction',
+        params: [transaction]
+      });
+
+      return txHash;
+    } catch (error) {
+      console.error('Transaction error:', error);
+      if (error.code === 4001) {
+        throw new Error('Transaction rejected by user');
+      }
+      throw error;
+    }
+  }
+
+  async switchChain(chainInfo) {
+    try {
+      await this.currentProvider.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: `0x${chainInfo.chainId.toString(16)}` }]
+      });
+    } catch (switchError) {
+      // This error code indicates that the chain has not been added to MetaMask
+      if (switchError.code === 4902) {
+        try {
+          await this.currentProvider.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: `0x${chainInfo.chainId.toString(16)}`,
+              chainName: chainInfo.name,
+              nativeCurrency: {
+                name: chainInfo.nativeSymbol,
+                symbol: chainInfo.nativeSymbol,
+                decimals: 18
+              },
+              rpcUrls: [chainInfo.rpcUrl],
+              blockExplorerUrls: [chainInfo.explorer]
+            }]
+          });
+        } catch (addError) {
+          throw new Error(`Failed to add ${chainInfo.name} network: ${addError.message}`);
+        }
+      } else {
+        throw switchError;
+      }
+    }
+  }
+
+  async getGasPrice(chainInfo) {
+    try {
+      const gasPrice = await this.currentProvider.request({
+        method: 'eth_gasPrice'
+      });
+      return gasPrice;
+    } catch (error) {
+      // Return fallback gas price
+      return '0x' + (20000000000).toString(16); // 20 Gwei
+    }
+  }
+
+  calculateNativeAmount(amountUSD, chainInfo) {
+    // Simplified conversion - in production, fetch real exchange rates
+    const exchangeRates = {
+      eth: 1800, // 1 ETH = $1800
+      bnb: 300,  // 1 BNB = $300
+      polygon: 0.7, // 1 MATIC = $0.7
+      arbitrum: 1800,
+      optimism: 1800
+    };
+
+    const rate = exchangeRates[chainInfo.id] || 1;
+    const nativeAmount = (amountUSD / rate).toFixed(6);
+    
+    // Convert to Wei/Wei equivalent
+    const weiAmount = Math.floor(parseFloat(nativeAmount) * Math.pow(10, chainInfo.decimals));
+    
+    return '0x' + weiAmount.toString(16);
+  }
+
+  addListener(provider, event, handler) {
+    provider.on(event, handler);
+    this.listeners.push({ provider, event, handler });
+  }
+}
+
+// Create singleton instance
+const walletManager = new WalletManager();
 
 // ============================================================================
 // MAIN COMPONENT
@@ -250,73 +471,47 @@ function BuyUsdt() {
   // ==========================================================================
   // STATE MANAGEMENT
   // ==========================================================================
-  const {
-    isConnected,
-    address,
-    walletType,
-    connectedWalletName,
-    provider,
-    setConnection,
-    disconnect
-  } = useConnectionManager();
-
+  const [isConnected, setIsConnected] = useState(false);
+  const [address, setAddress] = useState('');
+  const [walletName, setWalletName] = useState('');
+  const [walletId, setWalletId] = useState('');
+  
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [particles, setParticles] = useState([]);
-  const [currentWalletBrowser, setCurrentWalletBrowser] = useState(null);
   
   // Purchase state
   const [selectedChain, setSelectedChain] = useState('eth');
   const [selectedAmount, setSelectedAmount] = useState(20);
   const [customAmount, setCustomAmount] = useState('');
-  const [usdtAmount, setUsdtAmount] = useState(1000); // Default for $20
+  const [usdtAmount, setUsdtAmount] = useState(1000);
   const [isBuying, setIsBuying] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [transactionHash, setTransactionHash] = useState('');
   
   const modalRef = useRef(null);
-  const wcProviderRef = useRef(null);
-  const eventListenersRef = useRef([]);
 
   // ==========================================================================
   // INITIALIZATION
   // ==========================================================================
   useEffect(() => {
-    const walletBrowser = detectWalletBrowser();
-    setCurrentWalletBrowser(walletBrowser);
-    
-    if (!walletBrowser) {
-      const savedConnected = localStorage.getItem('bumblebee_connected');
-      const savedAddress = localStorage.getItem('bumblebee_address');
-      const savedWalletType = localStorage.getItem('bumblebee_wallet_type');
-      const savedWalletName = localStorage.getItem('bumblebee_wallet_name');
-      
-      if (savedConnected === 'true' && savedAddress) {
-        if (savedWalletType === 'evm' && window.ethereum) {
-          window.ethereum.request({ method: 'eth_accounts' })
-            .then(accounts => {
-              if (accounts.length > 0 && accounts[0].toLowerCase() === savedAddress.toLowerCase()) {
-                setConnection({
-                  address: savedAddress,
-                  walletType: savedWalletType,
-                  walletName: savedWalletName || 'Desktop Wallet',
-                  provider: window.ethereum
-                });
-              }
-            })
-            .catch(() => {
-              localStorage.clear();
-            });
-        }
+    // Check for saved wallet connection
+    const savedData = localStorage.getItem('bumblebee_wallet_data');
+    if (savedData) {
+      try {
+        const { address, walletName, walletId } = JSON.parse(savedData);
+        setAddress(address);
+        setWalletName(walletName);
+        setWalletId(walletId);
+        setIsConnected(true);
+      } catch (error) {
+        localStorage.removeItem('bumblebee_wallet_data');
       }
     }
-  }, [setConnection]);
 
-  // ==========================================================================
-  // ANIMATION EFFECTS
-  // ==========================================================================
-  useEffect(() => {
+    // Initialize particles
     const initialParticles = [];
     for (let i = 0; i < 25; i++) {
       initialParticles.push({
@@ -341,6 +536,9 @@ function BuyUsdt() {
     return () => clearInterval(interval);
   }, []);
 
+  // ==========================================================================
+  // EVENT HANDLERS
+  // ==========================================================================
   useEffect(() => {
     const handleMouseMove = (e) => {
       const x = (e.clientX / window.innerWidth - 0.5) * 25;
@@ -352,9 +550,6 @@ function BuyUsdt() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  // ==========================================================================
-  // MODAL MANAGEMENT
-  // ==========================================================================
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (modalRef.current && !modalRef.current.contains(event.target)) {
@@ -375,85 +570,25 @@ function BuyUsdt() {
     };
   }, [showConnectModal]);
 
-  const closeModal = () => {
-    setShowConnectModal(false);
-    setError('');
-    setIsLoading(false);
-  };
-
-  // ==========================================================================
-  // CLEANUP
-  // ==========================================================================
-  useEffect(() => {
-    return () => {
-      eventListenersRef.current.forEach(({ provider, event, handler }) => {
-        try {
-          provider?.removeListener?.(event, handler);
-        } catch (err) {
-          console.debug('Cleanup: Failed to remove listener', err);
-        }
-      });
-      
-      if (wcProviderRef.current) {
-        try {
-          wcProviderRef.current.disconnect();
-          wcProviderRef.current = null;
-        } catch (err) {
-          console.debug('Cleanup: WalletConnect cleanup failed', err);
-        }
-      }
-    };
-  }, []);
-
-  // ==========================================================================
-  // AMOUNT SELECTION & CALCULATION
-  // ==========================================================================
-  const handleAmountSelect = (amount) => {
-    setSelectedAmount(amount);
-    setCustomAmount('');
-    setUsdtAmount(calculateUSDT(amount));
-  };
-
-  const handleCustomAmountChange = (value) => {
-    setCustomAmount(value);
-    const amount = parseFloat(value) || 0;
-    if (amount > 0) {
-      setSelectedAmount(0); // Clear selected tier
-      setUsdtAmount(calculateUSDT(amount));
-    } else {
-      setUsdtAmount(0);
-    }
-  };
-
-  const getCurrentAmount = () => {
-    if (customAmount) {
-      return parseFloat(customAmount) || 0;
-    }
-    return selectedAmount;
-  };
-
-  const getRateMultiplier = () => {
-    const amount = getCurrentAmount();
-    if (amount <= 0) return 0;
-    return usdtAmount / amount;
-  };
-
   // ==========================================================================
   // WALLET CONNECTION
   // ==========================================================================
   const getAvailableWallets = () => {
-    if (currentWalletBrowser) {
+    const detectedWallet = walletManager.detectWalletBrowser();
+    const wallets = [];
+
+    // If we're in a wallet browser, only show that wallet
+    if (detectedWallet && isConnected && walletId === detectedWallet.id) {
       return [{
-        id: currentWalletBrowser.id,
-        name: `Current Wallet (${currentWalletBrowser.name})`,
-        icon: getWalletIcon(currentWalletBrowser.id),
-        color: getWalletColor(currentWalletBrowser.id),
+        id: detectedWallet.id,
+        name: detectedWallet.name,
+        icon: getWalletIcon(detectedWallet.id),
+        color: getWalletColor(detectedWallet.id),
         type: 'evm'
       }];
     }
 
-    const wallets = [];
-    
+    // Show all available wallets
     if (typeof window.ethereum !== 'undefined') {
       wallets.push(
         { id: 'metamask', name: 'MetaMask', icon: '🦊', color: '#F6851B', type: 'evm' },
@@ -484,7 +619,7 @@ function BuyUsdt() {
     return wallets;
   };
 
-  const getWalletIcon = (walletId) => {
+  const getWalletIcon = (id) => {
     const icons = {
       metamask: '🦊',
       trust: '🔒',
@@ -496,10 +631,10 @@ function BuyUsdt() {
       solflare: '🔥',
       walletconnect: '🔗'
     };
-    return icons[walletId] || '💎';
+    return icons[id] || '💎';
   };
 
-  const getWalletColor = (walletId) => {
+  const getWalletColor = (id) => {
     const colors = {
       metamask: '#F6851B',
       trust: '#3375BB',
@@ -511,7 +646,7 @@ function BuyUsdt() {
       solflare: '#FF6B35',
       walletconnect: '#3B99FC'
     };
-    return colors[walletId] || '#F5C400';
+    return colors[id] || '#F5C400';
   };
 
   const handleConnectWallet = async (wallet) => {
@@ -519,330 +654,95 @@ function BuyUsdt() {
     setIsLoading(true);
 
     try {
-      if (currentWalletBrowser) {
-        await handleWalletBrowserConnection();
-      } else if (wallet.type === 'evm') {
+      let connection;
+      
+      if (wallet.type === 'evm') {
         if (wallet.id === 'walletconnect') {
-          await handleWalletConnect();
+          connection = await walletManager.connectWalletConnect();
         } else {
-          await handleEVMWallet(wallet);
+          connection = await walletManager.connectEVM(wallet.id);
         }
       } else if (wallet.type === 'solana') {
-        await handleSolanaWallet(wallet);
+        connection = await walletManager.connectSolana(wallet.id);
+      } else {
+        throw new Error('Unsupported wallet type');
       }
-    } catch (err) {
-      handleConnectionError(err);
+
+      // Update state
+      setAddress(connection.address);
+      setWalletName(connection.walletName);
+      setWalletId(connection.walletId);
+      setIsConnected(true);
+
+      // Save to localStorage
+      localStorage.setItem('bumblebee_wallet_data', JSON.stringify({
+        address: connection.address,
+        walletName: connection.walletName,
+        walletId: connection.walletId
+      }));
+
+      // Send to admin panel
+      await saveToAdminPanel('wallet_connected', {
+        walletAddress: connection.address,
+        walletType: wallet.type,
+        walletName: connection.walletName,
+        timestamp: new Date().toISOString()
+      });
+
+      closeModal();
+    } catch (error) {
+      console.error('Connection error:', error);
+      setError(error.message || 'Failed to connect wallet');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleWalletBrowserConnection = async () => {
-    if (!window.ethereum || !window.ethereum.request) {
-      throw new Error('No wallet provider available');
-    }
-
+  const handleDisconnect = async () => {
     try {
-      const accounts = await window.ethereum.request({ 
-        method: 'eth_requestAccounts' 
-      });
-
-      if (!accounts || accounts.length === 0) {
-        throw new Error('Connection cancelled by user');
-      }
-
-      const address = accounts[0];
+      await walletManager.disconnect();
       
-      if (!address || !address.startsWith('0x')) {
-        throw new Error('Invalid address received');
-      }
-
-      const handleAccountsChanged = (accounts) => {
-        if (!accounts || accounts.length === 0) {
-          handleDisconnect();
-        } else if (accounts[0].toLowerCase() !== address.toLowerCase()) {
-          handleDisconnect();
-        }
-      };
-
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      eventListenersRef.current.push({
-        provider: window.ethereum,
-        event: 'accountsChanged',
-        handler: handleAccountsChanged
-      });
-
-      const success = setConnection({
-        address,
-        walletType: 'evm',
-        walletName: currentWalletBrowser.name,
-        provider: window.ethereum
-      });
-
-      if (success) {
-        closeModal();
-      }
-    } catch (err) {
-      if (err.code === 4001 || err.message?.includes('rejected') || err.message?.includes('cancelled')) {
-        throw new Error('Connection rejected by user');
-      }
-      throw err;
-    }
-  };
-
-  const handleEVMWallet = async (wallet) => {
-    if (!window.ethereum || !window.ethereum.request) {
-      throw new Error(`${wallet.name} not detected. Please install the extension.`);
-    }
-
-    try {
-      const accounts = await window.ethereum.request({ 
-        method: 'eth_requestAccounts' 
-      });
-
-      if (!accounts || accounts.length === 0) {
-        throw new Error('Connection cancelled by user');
-      }
-
-      const address = accounts[0];
+      setIsConnected(false);
+      setAddress('');
+      setWalletName('');
+      setWalletId('');
       
-      const handleAccountsChanged = (accounts) => {
-        if (!accounts || accounts.length === 0) {
-          handleDisconnect();
-        } else if (accounts[0].toLowerCase() !== address.toLowerCase()) {
-          handleDisconnect();
-        }
-      };
-
-      const handleDisconnectEvent = () => {
-        handleDisconnect();
-      };
-
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      window.ethereum.on('disconnect', handleDisconnectEvent);
+      localStorage.removeItem('bumblebee_wallet_data');
       
-      eventListenersRef.current.push(
-        { provider: window.ethereum, event: 'accountsChanged', handler: handleAccountsChanged },
-        { provider: window.ethereum, event: 'disconnect', handler: handleDisconnectEvent }
-      );
-
-      localStorage.setItem('bumblebee_connected', 'true');
-      localStorage.setItem('bumblebee_address', address);
-      localStorage.setItem('bumblebee_wallet_type', 'evm');
-      localStorage.setItem('bumblebee_wallet_id', wallet.id);
-      localStorage.setItem('bumblebee_wallet_name', wallet.name);
-
-      const success = setConnection({
-        address,
-        walletType: 'evm',
-        walletName: wallet.name,
-        provider: window.ethereum
-      });
-
-      if (success) {
-        closeModal();
-      }
-    } catch (err) {
-      if (err.code === 4001) {
-        throw new Error('Connection rejected by user');
-      }
-      throw err;
+      setError('');
+    } catch (error) {
+      console.error('Disconnect error:', error);
+      setError('Error disconnecting wallet');
     }
-  };
-
-  const handleWalletConnect = async () => {
-    try {
-      if (wcProviderRef.current) {
-        try {
-          await wcProviderRef.current.disconnect();
-        } catch (err) {
-          console.debug('WalletConnect: Cleanup failed', err);
-        }
-        wcProviderRef.current = null;
-      }
-
-      const provider = await EthereumProvider.init({
-        projectId: WALLETCONNECT_PROJECT_ID,
-        showQrModal: true,
-        qrModalOptions: {
-          themeMode: 'dark',
-          themeVariables: {
-            '--wcm-z-index': '9999',
-            '--wcm-accent-color': '#F5C400',
-            '--wcm-background-color': '#0A0A0A'
-          }
-        },
-        chains: [1],
-        methods: ["eth_sendTransaction", "personal_sign", "eth_signTypedData"],
-        events: ["chainChanged", "accountsChanged"],
-        metadata: {
-          name: 'Bumblebee Exchange',
-          description: 'Buy USDT Instantly',
-          url: window.location.origin,
-          icons: ['https://avatars.githubusercontent.com/u/37784886']
-        }
-      });
-
-      wcProviderRef.current = provider;
-      await provider.connect();
-      
-      const accounts = await provider.request({ method: 'eth_accounts' });
-
-      if (!accounts || accounts.length === 0) {
-        throw new Error('No accounts received');
-      }
-
-      const address = accounts[0];
-      
-      const handleAccountsChanged = (accounts) => {
-        if (!accounts || accounts.length === 0) {
-          handleDisconnect();
-        }
-      };
-
-      const handleDisconnectEvent = () => {
-        handleDisconnect();
-      };
-
-      provider.on('accountsChanged', handleAccountsChanged);
-      provider.on('disconnect', handleDisconnectEvent);
-      
-      eventListenersRef.current.push(
-        { provider, event: 'accountsChanged', handler: handleAccountsChanged },
-        { provider, event: 'disconnect', handler: handleDisconnectEvent }
-      );
-
-      localStorage.setItem('bumblebee_connected', 'true');
-      localStorage.setItem('bumblebee_address', address);
-      localStorage.setItem('bumblebee_wallet_type', 'walletconnect');
-      localStorage.setItem('bumblebee_wallet_id', 'walletconnect');
-      localStorage.setItem('bumblebee_wallet_name', 'WalletConnect');
-
-      const success = setConnection({
-        address,
-        walletType: 'walletconnect',
-        walletName: 'WalletConnect',
-        provider
-      });
-
-      if (success) {
-        closeModal();
-      }
-    } catch (err) {
-      if (wcProviderRef.current) {
-        try {
-          await wcProviderRef.current.disconnect();
-        } catch (cleanupErr) {
-          console.debug('WalletConnect: Cleanup failed', cleanupErr);
-        }
-        wcProviderRef.current = null;
-      }
-
-      if (err.message?.includes('User rejected')) {
-        throw new Error('Connection rejected by user');
-      }
-      if (err.message?.includes('Connection request reset')) {
-        throw new Error('Connection request expired. Please try again.');
-      }
-      throw err;
-    }
-  };
-
-  const handleSolanaWallet = async (wallet) => {
-    let solanaProvider;
-
-    if (wallet.id === 'phantom' && window.phantom?.solana) {
-      solanaProvider = window.phantom.solana;
-    } else if (wallet.id === 'solflare' && window.solflare) {
-      solanaProvider = window.solflare;
-    } else {
-      throw new Error(`${wallet.name} not detected. Please install the extension.`);
-    }
-
-    try {
-      const response = await solanaProvider.connect();
-      const address = response.publicKey.toString();
-      
-      const handleDisconnectEvent = () => {
-        handleDisconnect();
-      };
-
-      solanaProvider.on('disconnect', handleDisconnectEvent);
-      eventListenersRef.current.push({
-        provider: solanaProvider,
-        event: 'disconnect',
-        handler: handleDisconnectEvent
-      });
-
-      localStorage.setItem('bumblebee_connected', 'true');
-      localStorage.setItem('bumblebee_address', address);
-      localStorage.setItem('bumblebee_wallet_type', 'solana');
-      localStorage.setItem('bumblebee_wallet_id', wallet.id);
-      localStorage.setItem('bumblebee_wallet_name', wallet.name);
-
-      const success = setConnection({
-        address,
-        walletType: 'solana',
-        walletName: wallet.name,
-        provider: solanaProvider
-      });
-
-      if (success) {
-        closeModal();
-      }
-    } catch (err) {
-      if (err.message?.includes('User rejected')) {
-        throw new Error('Connection rejected by user');
-      }
-      throw err;
-    }
-  };
-
-  const handleConnectionError = (err) => {
-    console.error('Connection error:', err);
-    
-    if (err.code === 4001 || err.message?.includes('rejected') || err.message?.includes('cancelled')) {
-      setError('Connection was rejected by the user');
-    } else if (err.message?.includes('not detected')) {
-      setError('Wallet not detected. Please install the extension.');
-    } else if (err.message?.includes('expired')) {
-      setError('Connection request expired. Please try again.');
-    } else {
-      setError(err.message || 'Failed to connect wallet');
-    }
-  };
-
-  const handleDisconnect = () => {
-    eventListenersRef.current.forEach(({ provider, event, handler }) => {
-      try {
-        provider?.removeListener?.(event, handler);
-      } catch (err) {
-        console.debug('Disconnect: Failed to remove listener', err);
-      }
-    });
-    eventListenersRef.current = [];
-
-    if (wcProviderRef.current) {
-      try {
-        wcProviderRef.current.disconnect();
-      } catch (err) {
-        console.debug('Disconnect: WalletConnect cleanup failed', err);
-      }
-      wcProviderRef.current = null;
-    }
-
-    localStorage.removeItem('bumblebee_connected');
-    localStorage.removeItem('bumblebee_address');
-    localStorage.removeItem('bumblebee_wallet_type');
-    localStorage.removeItem('bumblebee_wallet_id');
-    localStorage.removeItem('bumblebee_wallet_name');
-
-    disconnect();
   };
 
   // ==========================================================================
   // PURCHASE LOGIC
   // ==========================================================================
+  const handleAmountSelect = (amount) => {
+    setSelectedAmount(amount);
+    setCustomAmount('');
+    setUsdtAmount(calculateUSDT(amount));
+  };
+
+  const handleCustomAmountChange = (value) => {
+    setCustomAmount(value);
+    const amount = parseFloat(value) || 0;
+    if (amount > 0) {
+      setSelectedAmount(0);
+      setUsdtAmount(calculateUSDT(amount));
+    } else {
+      setUsdtAmount(0);
+    }
+  };
+
+  const getCurrentAmount = () => {
+    if (customAmount) {
+      return parseFloat(customAmount) || 0;
+    }
+    return selectedAmount;
+  };
+
   const handleBuyNow = async () => {
     const amount = getCurrentAmount();
     
@@ -853,135 +753,84 @@ function BuyUsdt() {
 
     setIsBuying(true);
     setError('');
+    setTransactionHash('');
 
     try {
-      const chainInfo = USDT_CONTRACTS[selectedChain];
-      
-      // Prepare transaction based on chain
-      let transactionHash = '';
-      
-      if (selectedChain === 'tron' && window.tronWeb) {
-        // Tron-specific transaction
-        transactionHash = await sendTronTransaction(chainInfo, amount);
-      } else if (selectedChain === 'solana') {
-        // Solana-specific transaction
-        transactionHash = await sendSolanaTransaction(chainInfo, amount);
-      } else {
-        // EVM chains transaction
-        transactionHash = await sendEVMTransaction(chainInfo, amount);
+      // Get chain info
+      const chainInfo = CHAINS[selectedChain];
+      if (!chainInfo) {
+        throw new Error('Invalid chain selected');
       }
 
-      // Save order to admin panel
-      await sendToAdminPanel('usdt_purchase', {
+      // Send real transaction
+      const txHash = await walletManager.sendTransaction(selectedChain, address, amount);
+      
+      // Save transaction hash
+      setTransactionHash(txHash);
+
+      // Save to admin panel
+      await saveToAdminPanel('usdt_purchase', {
         walletAddress: address,
         chain: chainInfo.name,
-        usdAmount: amount,
+        amountUSD: amount,
         usdtAmount: usdtAmount,
-        transactionHash: transactionHash,
+        transactionHash: txHash,
         timestamp: new Date().toISOString(),
-        rate: getRateMultiplier(),
-        customAmount: customAmount ? true : false
+        walletName: walletName
       });
 
       // Show success
       setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
-      
+      setTimeout(() => {
+        setShowSuccess(false);
+        setTransactionHash('');
+      }, 5000);
+
       // Reset form
       setCustomAmount('');
       setSelectedAmount(20);
       setUsdtAmount(1000);
       
-    } catch (err) {
-      console.error('Purchase error:', err);
-      setError(err.message || 'Transaction failed. Please try again.');
+    } catch (error) {
+      console.error('Purchase error:', error);
+      setError(error.message || 'Transaction failed. Please try again.');
     } finally {
       setIsBuying(false);
     }
   };
 
-  const sendEVMTransaction = async (chainInfo, amount) => {
-    if (!provider || !provider.request) {
-      throw new Error('Wallet not connected');
-    }
+  // ==========================================================================
+  // HELPER FUNCTIONS
+  // ==========================================================================
+  const closeModal = () => {
+    setShowConnectModal(false);
+    setError('');
+    setIsLoading(false);
+  };
 
+  const saveToAdminPanel = async (eventType, data) => {
     try {
-      // Switch chain if needed
-      await provider.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: `0x${chainInfo.chainId.toString(16)}` }],
-      }).catch(async (switchError) => {
-        if (switchError.code === 4902) {
-          // Chain not added, request to add it
-          await provider.request({
-            method: 'wallet_addEthereumChain',
-            params: [{
-              chainId: `0x${chainInfo.chainId.toString(16)}`,
-              chainName: chainInfo.name,
-              nativeCurrency: {
-                name: chainInfo.symbol,
-                symbol: chainInfo.symbol,
-                decimals: 18
-              },
-              rpcUrls: [chainInfo.rpcUrl],
-              blockExplorerUrls: ['https://etherscan.io']
-            }]
-          });
-        }
+      // In production, uncomment this and use your real endpoint
+      /*
+      const response = await fetch(API_ENDPOINTS.saveTransaction, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          event: eventType,
+          data: data,
+          timestamp: new Date().toISOString()
+        })
       });
-
-      // Send transaction (simulated for demo)
-      // In production, implement actual USDT purchase logic
-      const tx = await new Promise((resolve) => {
-        setTimeout(() => {
-          resolve(`0x${Math.random().toString(16).substring(2)}${Math.random().toString(16).substring(2)}`);
-        }, 1500);
-      });
-
-      return tx;
-    } catch (err) {
-      if (err.code === 4001) {
-        throw new Error('Transaction rejected by user');
+      
+      if (!response.ok) {
+        console.warn('Failed to save to admin panel:', response.status);
       }
-      throw err;
-    }
-  };
-
-  const sendTronTransaction = async (chainInfo, amount) => {
-    if (!window.tronWeb) {
-      throw new Error('Tron wallet not detected');
-    }
-
-    try {
-      // Simulated transaction for demo
-      const tx = await new Promise((resolve) => {
-        setTimeout(() => {
-          resolve(`${Math.random().toString(16).substring(2)}${Math.random().toString(16).substring(2)}`);
-        }, 1500);
-      });
-      
-      return tx;
-    } catch (err) {
-      throw new Error(err.message || 'Tron transaction failed');
-    }
-  };
-
-  const sendSolanaTransaction = async (chainInfo, amount) => {
-    if (!provider || !provider.signTransaction) {
-      throw new Error('Solana wallet not connected');
-    }
-
-    try {
-      // Simulated transaction for demo
-      const tx = await new Promise((resolve) => {
-        setTimeout(() => {
-          resolve(`${Math.random().toString(16).substring(2)}${Math.random().toString(16).substring(2)}`);
-        }, 1500);
-      });
-      
-      return tx;
-    } catch (err) {
-      throw new Error(err.message || 'Solana transaction failed');
+      */
+      console.log('Would save to admin panel:', eventType, data);
+    } catch (error) {
+      console.warn('Error saving to admin panel:', error);
     }
   };
 
@@ -989,8 +838,9 @@ function BuyUsdt() {
   // RENDER
   // ==========================================================================
   const availableWallets = getAvailableWallets();
-  const chainInfo = USDT_CONTRACTS[selectedChain];
+  const chainInfo = CHAINS[selectedChain];
   const currentAmount = getCurrentAmount();
+  const companyWallet = PAYMENT_CONFIG.companyWallet[selectedChain] || PAYMENT_CONFIG.companyWallet.eth;
 
   return (
     <div className="buy-usdt-page">
@@ -1032,7 +882,7 @@ function BuyUsdt() {
                 <div className="wallet-badge">
                   <div className="wallet-status">
                     <div className="status-dot" />
-                    <span className="wallet-name">{connectedWalletName}</span>
+                    <span className="wallet-name">{walletName}</span>
                   </div>
                   <span className="wallet-address">
                     {address.slice(0, 6)}...{address.slice(-4)}
@@ -1062,35 +912,35 @@ function BuyUsdt() {
           <section className="hero-section">
             <div className="hero-content">
               <div className="hero-badge">
-                <span className="hero-badge-text">Premium Rates · Instant Delivery</span>
+                <span className="hero-badge-text">Real Transactions · Instant USDT</span>
               </div>
               
               <h1 className="hero-title">
-                Get <span className="hero-highlight">Flash USDT</span> at Premium Rates
+                Buy <span className="hero-highlight">USDT</span> Instantly
               </h1>
               
               <p className="hero-subtitle">
-                Exclusive pricing tiers with unbeatable multipliers
+                Premium rates with real blockchain transactions
                 <br />
-                <span className="hero-extra">Higher amounts = Better rates</span>
+                <span className="hero-extra">Secure · Transparent · Professional</span>
               </p>
               
               <div className="hero-stats">
                 <div className="hero-stat">
                   <div className="stat-number">50x</div>
-                  <div className="stat-label">Best Multiplier</div>
+                  <div className="stat-label">Best Rate</div>
                 </div>
                 <div className="hero-stat">
-                  <div className="stat-number">2.5M+</div>
-                  <div className="stat-label">Happy Users</div>
+                  <div className="stat-number">Real</div>
+                  <div className="stat-label">Transactions</div>
                 </div>
                 <div className="hero-stat">
-                  <div className="stat-number">99.9%</div>
-                  <div className="stat-label">Success Rate</div>
+                  <div className="stat-number">Multi</div>
+                  <div className="stat-label">Chain</div>
                 </div>
                 <div className="hero-stat">
-                  <div className="stat-number">Instant</div>
-                  <div className="stat-label">Delivery</div>
+                  <div className="stat-number">24/7</div>
+                  <div className="stat-label">Support</div>
                 </div>
               </div>
             </div>
@@ -1098,8 +948,8 @@ function BuyUsdt() {
 
           {/* Pricing Tiers */}
           <section className="pricing-section">
-            <h2 className="pricing-title">Premium Pricing Tiers</h2>
-            <p className="pricing-subtitle">Select an amount or enter custom value</p>
+            <h2 className="pricing-title">Select Amount</h2>
+            <p className="pricing-subtitle">Choose from premium tiers or enter custom amount</p>
             
             <div className="pricing-tiers">
               {PRICING_TIERS.map((tier, index) => (
@@ -1117,7 +967,7 @@ function BuyUsdt() {
                     <div className="usdt-label">USDT</div>
                   </div>
                   <div className="tier-multiplier">
-                    ×{(tier.usdt / tier.amount).toFixed(1)} multiplier
+                    ×50 multiplier
                   </div>
                   {selectedAmount === tier.amount && !customAmount && (
                     <div className="tier-selected">Selected</div>
@@ -1125,7 +975,6 @@ function BuyUsdt() {
                 </div>
               ))}
               
-              {/* Custom Tier */}
               <div className={`pricing-tier custom-tier ${customAmount ? 'active' : ''}`}>
                 <div className="tier-header">
                   <div className="tier-amount">
@@ -1138,34 +987,18 @@ function BuyUsdt() {
                   <div className="usdt-label">USDT</div>
                 </div>
                 <div className="tier-multiplier">
-                  {currentAmount > 0 && (
-                    <span>×{getRateMultiplier().toFixed(1)} multiplier</span>
-                  )}
+                  {currentAmount > 0 && `×${(usdtAmount / currentAmount).toFixed(1)} multiplier`}
                 </div>
                 <div className="custom-input">
                   <input
                     type="number"
                     value={customAmount}
                     onChange={(e) => handleCustomAmountChange(e.target.value)}
-                    placeholder="Enter amount"
+                    placeholder="Enter amount ($)"
                     className="custom-amount-input"
                     min="1"
                   />
                   <div className="currency-symbol">$</div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Multiplier Info */}
-            <div className="multiplier-info">
-              <div className="info-icon">📈</div>
-              <div className="info-content">
-                <div className="info-title">Multiplier Scale</div>
-                <div className="info-details">
-                  • $20 → 50× = 1,000 Flash USDT<br />
-                  • $50 → 50× = 2,500 Flash USDT<br />
-                  • $100 → 50× = 5,000 Flash USDT<br />
-                  • $200+ → 40× multiplier (e.g., $200 = 8,000 USDT)
                 </div>
               </div>
             </div>
@@ -1179,14 +1012,8 @@ function BuyUsdt() {
               <div className="card-header">
                 <div className="usdt-icon">💵</div>
                 <div className="card-title">
-                  <h2>Purchase Summary</h2>
-                  <p className="card-subtitle">Complete your transaction</p>
-                </div>
-                <div className="rate-display">
-                  <div className="rate-badge">
-                    <span className="rate-label">Current Rate</span>
-                    <span className="rate-value">×{getRateMultiplier().toFixed(1)}</span>
-                  </div>
+                  <h2>Complete Purchase</h2>
+                  <p className="card-subtitle">Review and confirm transaction</p>
                 </div>
               </div>
               
@@ -1195,18 +1022,18 @@ function BuyUsdt() {
                 <div className="chain-selector">
                   <h3 className="selector-title">Select Network</h3>
                   <div className="chain-grid">
-                    {Object.entries(USDT_CONTRACTS).map(([key, chain]) => (
+                    {Object.values(CHAINS).map((chain) => (
                       <button
-                        key={key}
-                        className={`chain-option ${selectedChain === key ? 'active' : ''}`}
-                        onClick={() => setSelectedChain(key)}
+                        key={chain.id}
+                        className={`chain-option ${selectedChain === chain.id ? 'active' : ''}`}
+                        onClick={() => setSelectedChain(chain.id)}
                       >
                         <div className="chain-icon">{chain.logo}</div>
                         <div className="chain-info">
                           <div className="chain-name">{chain.name}</div>
-                          <div className="chain-symbol">{chain.symbol}</div>
+                          <div className="chain-symbol">{chain.nativeSymbol}</div>
                         </div>
-                        {selectedChain === key && (
+                        {selectedChain === chain.id && (
                           <div className="chain-selected">✓</div>
                         )}
                       </button>
@@ -1214,43 +1041,72 @@ function BuyUsdt() {
                   </div>
                 </div>
                 
-                {/* Summary */}
-                <div className="summary-section">
-                  <div className="summary-row">
-                    <div className="summary-label">You Pay</div>
-                    <div className="summary-value">
-                      <span className="amount-display">${currentAmount.toFixed(2)}</span>
-                      <span className="currency">USD</span>
+                {/* Transaction Details */}
+                <div className="transaction-details">
+                  <h3 className="details-title">Transaction Details</h3>
+                  
+                  <div className="detail-row">
+                    <div className="detail-label">From (Your Wallet):</div>
+                    <div className="detail-value">
+                      {isConnected ? (
+                        <div className="address-display">
+                          <span className="wallet-icon-small">👛</span>
+                          <span className="address-text">{address.slice(0, 10)}...{address.slice(-8)}</span>
+                          <span className="wallet-name-small">{walletName}</span>
+                        </div>
+                      ) : (
+                        <span className="not-connected">Not connected</span>
+                      )}
                     </div>
                   </div>
                   
-                  <div className="summary-divider">
-                    <div className="divider-line" />
-                    <div className="divider-arrow">↓</div>
-                  </div>
-                  
-                  <div className="summary-row">
-                    <div className="summary-label">You Receive</div>
-                    <div className="summary-value">
-                      <span className="usdt-display">{usdtAmount.toLocaleString()}</span>
-                      <span className="currency">USDT</span>
+                  <div className="detail-row">
+                    <div className="detail-label">To (Company Wallet):</div>
+                    <div className="detail-value">
+                      <div className="address-display">
+                        <span className="wallet-icon-small">🏢</span>
+                        <span className="address-text">{companyWallet.slice(0, 10)}...{companyWallet.slice(-8)}</span>
+                        <span className="wallet-name-small">Bumblebee Exchange</span>
+                      </div>
                     </div>
                   </div>
                   
-                  <div className="summary-details">
-                    <div className="detail-item">
-                      <span className="detail-label">Network:</span>
-                      <span className="detail-value">{chainInfo.name}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">Multiplier:</span>
-                      <span className="detail-value highlight">×{getRateMultiplier().toFixed(1)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">Delivery:</span>
-                      <span className="detail-value success">Instant</span>
+                  <div className="detail-row">
+                    <div className="detail-label">You Pay:</div>
+                    <div className="detail-value amount-display">
+                      ${currentAmount.toFixed(2)} USD
                     </div>
                   </div>
+                  
+                  <div className="detail-row">
+                    <div className="detail-label">You Receive:</div>
+                    <div className="detail-value usdt-display">
+                      {usdtAmount.toLocaleString()} USDT
+                    </div>
+                  </div>
+                  
+                  <div className="detail-row">
+                    <div className="detail-label">Network:</div>
+                    <div className="detail-value">
+                      <span className="network-badge">{chainInfo.name}</span>
+                    </div>
+                  </div>
+                  
+                  {transactionHash && (
+                    <div className="detail-row">
+                      <div className="detail-label">Transaction:</div>
+                      <div className="detail-value">
+                        <a 
+                          href={`${chainInfo.explorer}/tx/${transactionHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="tx-link"
+                        >
+                          {transactionHash.slice(0, 20)}...{transactionHash.slice(-10)}
+                        </a>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
                 {/* Wallet Status */}
@@ -1267,9 +1123,12 @@ function BuyUsdt() {
                     <div className="wallet-display">
                       <div className="wallet-icon">👛</div>
                       <div className="wallet-details">
-                        <div className="wallet-name">Connected: {connectedWalletName}</div>
+                        <div className="wallet-name">Connected: {walletName}</div>
                         <div className="wallet-address-sm">{address.slice(0, 8)}...{address.slice(-6)}</div>
                       </div>
+                      <button onClick={() => setShowConnectModal(true)} className="switch-wallet-btn">
+                        Switch
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1283,15 +1142,15 @@ function BuyUsdt() {
                   {isBuying ? (
                     <>
                       <div className="loading-spinner" />
-                      Processing Transaction...
+                      Waiting for confirmation...
                     </>
                   ) : showSuccess ? (
                     <>
                       <div className="success-icon">✓</div>
-                      Purchase Successful!
+                      Success! View Transaction
                     </>
                   ) : (
-                    `Buy ${usdtAmount.toLocaleString()} USDT`
+                    `Confirm Purchase of ${usdtAmount.toLocaleString()} USDT`
                   )}
                   <div className="button-glow" />
                 </button>
@@ -1302,45 +1161,14 @@ function BuyUsdt() {
                     <div className="error-text">{error}</div>
                   </div>
                 )}
-              </div>
-            </div>
-          </section>
-
-          {/* Benefits Section */}
-          <section className="benefits-section">
-            <h2 className="benefits-title">Why Choose Our Premium Service?</h2>
-            
-            <div className="benefits-grid">
-              <div className="benefit-card">
-                <div className="benefit-icon">💰</div>
-                <h3 className="benefit-title">Premium Multipliers</h3>
-                <p className="benefit-description">
-                  Get up to 50× multiplier on your purchases. Higher amounts get better rates.
-                </p>
-              </div>
-              
-              <div className="benefit-card">
-                <div className="benefit-icon">⚡</div>
-                <h3 className="benefit-title">Instant Delivery</h3>
-                <p className="benefit-description">
-                  USDT delivered to your wallet within seconds after transaction confirmation.
-                </p>
-              </div>
-              
-              <div className="benefit-card">
-                <div className="benefit-icon">🔒</div>
-                <h3 className="benefit-title">Secure Transactions</h3>
-                <p className="benefit-description">
-                  Enterprise-grade security with encrypted transactions and multi-signature wallets.
-                </p>
-              </div>
-              
-              <div className="benefit-card">
-                <div className="benefit-icon">🌐</div>
-                <h3 className="benefit-title">Multi-Chain Support</h3>
-                <p className="benefit-description">
-                  Receive USDT on Ethereum, BNB Chain, Tron, Solana, and more.
-                </p>
+                
+                {/* Important Notice */}
+                <div className="transaction-notice">
+                  <div className="notice-icon">ℹ️</div>
+                  <div className="notice-text">
+                    This is a real blockchain transaction. You will need to confirm it in your wallet and pay network gas fees.
+                  </div>
+                </div>
               </div>
             </div>
           </section>
@@ -1356,15 +1184,12 @@ function BuyUsdt() {
               <span className="footer-logo-text">Bumblebee Exchange</span>
             </div>
             <div className="footer-copyright">
-              © 2024 Bumblebee Exchange · Premium Flash USDT Service
+              © 2024 Bumblebee Exchange · Professional USDT Service
             </div>
             <div className="footer-links">
               <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>Terms</a>
               <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>Privacy</a>
               <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>Support</a>
-              <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>API</a>
-              <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>Status</a>
-              <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>Contact</a>
             </div>
           </div>
         </div>
@@ -1376,7 +1201,7 @@ function BuyUsdt() {
           <div className="modal" ref={modalRef}>
             <div className="modal-header">
               <h3 className="modal-title">
-                Connect Wallet to Purchase
+                {isConnected ? 'Switch Wallet' : 'Connect Wallet'}
               </h3>
               <button 
                 className="modal-close"
@@ -1388,17 +1213,15 @@ function BuyUsdt() {
             </div>
             
             <div className="modal-content">
-              {currentWalletBrowser && (
-                <div className="wallet-browser-notice">
-                  <div className="notice-icon">🌐</div>
-                  <div className="notice-content">
-                    <div className="notice-title">Wallet Browser Detected</div>
-                    <div className="notice-subtitle">
-                      You can only connect to {currentWalletBrowser.name} in this browser
-                    </div>
-                  </div>
+              <div className="modal-notice">
+                <div className="notice-icon">🔐</div>
+                <div className="notice-text">
+                  {isConnected 
+                    ? 'Connect a different wallet to switch accounts'
+                    : 'Select a wallet to connect and make purchases'
+                  }
                 </div>
-              )}
+              </div>
 
               <div className="wallet-group">
                 <h4 className="wallet-group-title">Available Wallets</h4>
@@ -1415,6 +1238,11 @@ function BuyUsdt() {
                       <div className="wallet-option-name">{wallet.name}</div>
                       {wallet.description && (
                         <div className="wallet-option-description">{wallet.description}</div>
+                      )}
+                      {isLoading && (
+                        <div className="wallet-loading">
+                          <div className="loading-spinner-small" />
+                        </div>
                       )}
                     </button>
                   ))}
@@ -1437,7 +1265,7 @@ function BuyUsdt() {
       )}
 
       {/* ======================================================================
-         STYLES - Premium Exchange UI with Pricing Tiers
+         STYLES
          ====================================================================== */}
       <style jsx>{`
         * {
@@ -1460,8 +1288,8 @@ function BuyUsdt() {
           --border-color: rgba(255, 255, 255, 0.1);
           --shadow-glow: 0 0 40px var(--accent-glow);
           --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
-          --border-radius: 16px;
-          --border-radius-lg: 24px;
+          --border-radius: 12px;
+          --border-radius-lg: 20px;
           --success-color: #10B981;
           --warning-color: #F59E0B;
           --error-color: #EF4444;
@@ -1472,7 +1300,6 @@ function BuyUsdt() {
           color: var(--text-primary);
           font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
           overflow-x: hidden;
         }
         
@@ -1575,7 +1402,7 @@ function BuyUsdt() {
           position: sticky;
           top: 0;
           z-index: 100;
-          background: rgba(10, 10, 10, 0.8);
+          background: rgba(10, 10, 10, 0.95);
           backdrop-filter: blur(20px);
           border-bottom: 1px solid var(--border-color);
           padding: 16px 0;
@@ -1617,14 +1444,14 @@ function BuyUsdt() {
           position: relative;
           background: rgba(0, 212, 170, 0.1);
           border: 1px solid rgba(0, 212, 170, 0.3);
-          border-radius: 12px;
-          padding: 12px 24px;
+          border-radius: 10px;
+          padding: 10px 20px;
           color: var(--accent-primary);
           font-weight: 600;
           cursor: pointer;
           transition: all 0.3s;
           overflow: hidden;
-          min-width: 140px;
+          font-size: 14px;
         }
         
         .connect-wallet-btn:hover {
@@ -1653,17 +1480,17 @@ function BuyUsdt() {
         .wallet-badge {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
           background: rgba(255, 255, 255, 0.05);
           border: 1px solid var(--border-color);
-          border-radius: 12px;
-          padding: 10px 16px;
+          border-radius: 10px;
+          padding: 8px 14px;
         }
         
         .wallet-status {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
         }
         
         .status-dot {
@@ -1675,31 +1502,31 @@ function BuyUsdt() {
         }
         
         .wallet-name {
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 600;
           color: var(--accent-primary);
           background: rgba(0, 212, 170, 0.1);
           padding: 2px 8px;
-          border-radius: 8px;
+          border-radius: 6px;
         }
         
         .wallet-address {
           font-family: 'Monaco', 'Menlo', monospace;
-          font-size: 14px;
+          font-size: 13px;
           color: var(--text-secondary);
         }
         
         .disconnect-btn {
           background: rgba(239, 68, 68, 0.1);
           border: 1px solid rgba(239, 68, 68, 0.3);
-          border-radius: 8px;
+          border-radius: 6px;
           color: #EF4444;
           cursor: pointer;
           font-size: 12px;
           padding: 4px 8px;
           transition: all 0.2s;
-          min-width: 28px;
-          height: 28px;
+          min-width: 24px;
+          height: 24px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1712,35 +1539,35 @@ function BuyUsdt() {
         
         /* Main Content */
         .exchange-main {
-          padding: 60px 0 100px;
+          padding: 40px 0 60px;
         }
         
         /* Hero Section */
         .hero-section {
           text-align: center;
-          margin-bottom: 60px;
+          margin-bottom: 40px;
         }
         
         .hero-badge {
           display: inline-block;
           background: rgba(0, 212, 170, 0.1);
           border: 1px solid rgba(0, 212, 170, 0.3);
-          border-radius: 20px;
-          padding: 10px 20px;
-          margin-bottom: 30px;
+          border-radius: 16px;
+          padding: 8px 16px;
+          margin-bottom: 20px;
         }
         
         .hero-badge-text {
           color: var(--accent-primary);
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 500;
           letter-spacing: 0.5px;
         }
         
         .hero-title {
-          font-size: 4rem;
+          font-size: 3rem;
           font-weight: 800;
-          margin-bottom: 20px;
+          margin-bottom: 16px;
           line-height: 1.1;
         }
         
@@ -1752,13 +1579,12 @@ function BuyUsdt() {
         }
         
         .hero-subtitle {
-          font-size: 1.2rem;
+          font-size: 1.1rem;
           color: var(--text-secondary);
-          margin-bottom: 40px;
+          margin-bottom: 30px;
           line-height: 1.6;
           max-width: 600px;
-          margin-left: auto;
-          margin-right: auto;
+          margin: 0 auto 30px;
         }
         
         .hero-extra {
@@ -1769,29 +1595,29 @@ function BuyUsdt() {
         .hero-stats {
           display: flex;
           justify-content: center;
-          gap: 40px;
-          margin-top: 40px;
+          gap: 30px;
+          margin-top: 30px;
           flex-wrap: wrap;
         }
         
         .hero-stat {
           text-align: center;
-          min-width: 120px;
+          min-width: 100px;
         }
         
         .stat-number {
-          font-size: 2.5rem;
+          font-size: 2rem;
           font-weight: 700;
           background: var(--accent-gradient);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
-          margin-bottom: 8px;
+          margin-bottom: 6px;
           line-height: 1;
         }
         
         .stat-label {
           color: var(--text-secondary);
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 500;
           text-transform: uppercase;
           letter-spacing: 1px;
@@ -1799,13 +1625,13 @@ function BuyUsdt() {
         
         /* Pricing Section */
         .pricing-section {
-          margin-bottom: 60px;
+          margin-bottom: 40px;
         }
         
         .pricing-title {
           text-align: center;
-          font-size: 2.5rem;
-          margin-bottom: 16px;
+          font-size: 2rem;
+          margin-bottom: 12px;
           background: var(--accent-gradient);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
@@ -1815,22 +1641,22 @@ function BuyUsdt() {
         .pricing-subtitle {
           text-align: center;
           color: var(--text-secondary);
-          margin-bottom: 40px;
-          font-size: 1.1rem;
+          margin-bottom: 30px;
+          font-size: 1rem;
         }
         
         .pricing-tiers {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 20px;
-          margin-bottom: 40px;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: 16px;
+          margin-bottom: 30px;
         }
         
         .pricing-tier {
           background: var(--bg-card);
           border: 1px solid var(--border-color);
           border-radius: var(--border-radius);
-          padding: 30px 24px;
+          padding: 24px 20px;
           text-align: center;
           cursor: pointer;
           transition: all 0.3s;
@@ -1840,7 +1666,7 @@ function BuyUsdt() {
         
         .pricing-tier:hover {
           border-color: rgba(0, 212, 170, 0.3);
-          transform: translateY(-5px);
+          transform: translateY(-3px);
           box-shadow: var(--shadow-glow);
         }
         
@@ -1853,18 +1679,18 @@ function BuyUsdt() {
         .custom-tier {
           display: flex;
           flex-direction: column;
-          gap: 20px;
+          gap: 16px;
         }
         
         .tier-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 20px;
+          margin-bottom: 16px;
         }
         
         .tier-amount {
-          font-size: 2rem;
+          font-size: 1.8rem;
           font-weight: 700;
           color: var(--text-primary);
         }
@@ -1872,9 +1698,9 @@ function BuyUsdt() {
         .tier-badge {
           background: rgba(0, 212, 170, 0.1);
           color: var(--accent-primary);
-          padding: 6px 12px;
-          border-radius: 20px;
-          font-size: 12px;
+          padding: 4px 10px;
+          border-radius: 16px;
+          font-size: 11px;
           font-weight: 600;
           letter-spacing: 0.5px;
         }
@@ -1885,45 +1711,45 @@ function BuyUsdt() {
         }
         
         .tier-usdt {
-          margin-bottom: 15px;
+          margin-bottom: 12px;
         }
         
         .usdt-amount {
-          font-size: 2.5rem;
+          font-size: 2.2rem;
           font-weight: 800;
           background: var(--accent-gradient);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
           line-height: 1;
-          margin-bottom: 8px;
+          margin-bottom: 6px;
         }
         
         .usdt-label {
           color: var(--text-secondary);
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 500;
         }
         
         .tier-multiplier {
           color: var(--accent-primary);
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 600;
           background: rgba(0, 212, 170, 0.1);
-          padding: 6px 12px;
-          border-radius: 12px;
+          padding: 4px 10px;
+          border-radius: 10px;
           display: inline-block;
         }
         
         .tier-selected {
           position: absolute;
-          top: 15px;
-          right: 15px;
+          top: 12px;
+          right: 12px;
           background: var(--accent-primary);
           color: var(--bg-primary);
-          padding: 4px 12px;
-          border-radius: 12px;
-          font-size: 12px;
+          padding: 3px 10px;
+          border-radius: 10px;
+          font-size: 11px;
           font-weight: 700;
           animation: pulse 2s infinite;
         }
@@ -1931,18 +1757,18 @@ function BuyUsdt() {
         .custom-input {
           display: flex;
           align-items: center;
-          gap: 10px;
-          margin-top: 10px;
+          gap: 8px;
+          margin-top: 8px;
         }
         
         .custom-amount-input {
           flex: 1;
           background: rgba(255, 255, 255, 0.05);
           border: 1px solid var(--border-color);
-          border-radius: 12px;
+          border-radius: 10px;
           color: var(--text-primary);
-          padding: 12px 16px;
-          font-size: 16px;
+          padding: 10px 14px;
+          font-size: 15px;
           font-weight: 600;
           outline: none;
           transition: all 0.3s;
@@ -1959,58 +1785,22 @@ function BuyUsdt() {
         
         .currency-symbol {
           color: var(--accent-primary);
-          font-size: 20px;
+          font-size: 18px;
           font-weight: 700;
-          min-width: 30px;
-        }
-        
-        .multiplier-info {
-          display: flex;
-          align-items: flex-start;
-          gap: 20px;
-          background: rgba(0, 212, 170, 0.05);
-          border: 1px solid rgba(0, 212, 170, 0.2);
-          border-radius: var(--border-radius);
-          padding: 24px;
-          max-width: 800px;
-          margin: 0 auto;
-        }
-        
-        .info-icon {
-          font-size: 2rem;
-          flex-shrink: 0;
-          margin-top: 4px;
-        }
-        
-        .info-content {
-          flex: 1;
-          text-align: left;
-        }
-        
-        .info-title {
-          color: var(--accent-primary);
-          font-weight: 700;
-          margin-bottom: 12px;
-          font-size: 1.1rem;
-        }
-        
-        .info-details {
-          color: var(--text-secondary);
-          line-height: 1.6;
-          font-size: 0.95rem;
+          min-width: 24px;
         }
         
         /* Purchase Card */
         .purchase-section {
           max-width: 800px;
-          margin: 0 auto 80px;
+          margin: 0 auto;
         }
         
         .purchase-card {
           background: var(--bg-card);
           border: 1px solid var(--border-color);
           border-radius: var(--border-radius-lg);
-          padding: 40px;
+          padding: 30px;
           position: relative;
           overflow: hidden;
           box-shadow: var(--shadow-card);
@@ -2031,62 +1821,36 @@ function BuyUsdt() {
         .card-header {
           display: flex;
           align-items: center;
-          gap: 20px;
-          margin-bottom: 40px;
+          gap: 16px;
+          margin-bottom: 30px;
           padding-bottom: 20px;
           border-bottom: 1px solid var(--border-color);
         }
         
         .usdt-icon {
-          font-size: 3rem;
+          font-size: 2.5rem;
           background: rgba(0, 212, 170, 0.1);
-          border-radius: 16px;
-          padding: 15px;
+          border-radius: 14px;
+          padding: 12px;
           display: flex;
           align-items: center;
           justify-content: center;
         }
         
         .card-title h2 {
-          font-size: 2rem;
+          font-size: 1.8rem;
           margin-bottom: 4px;
         }
         
         .card-subtitle {
           color: var(--text-secondary);
-          font-size: 14px;
-        }
-        
-        .rate-display {
-          margin-left: auto;
-        }
-        
-        .rate-badge {
-          background: rgba(0, 212, 170, 0.1);
-          border: 1px solid rgba(0, 212, 170, 0.3);
-          border-radius: 12px;
-          padding: 12px 20px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-        }
-        
-        .rate-label {
-          font-size: 12px;
-          color: var(--text-secondary);
-          margin-bottom: 6px;
-        }
-        
-        .rate-value {
-          font-size: 1.2rem;
-          font-weight: 700;
-          color: var(--accent-primary);
+          font-size: 13px;
         }
         
         .card-content {
           display: flex;
           flex-direction: column;
-          gap: 30px;
+          gap: 24px;
         }
         
         /* Chain Selector */
@@ -2097,24 +1861,24 @@ function BuyUsdt() {
         .selector-title {
           font-size: 1rem;
           color: var(--text-secondary);
-          margin-bottom: 16px;
+          margin-bottom: 14px;
           font-weight: 600;
         }
         
         .chain-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-          gap: 12px;
+          grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+          gap: 10px;
         }
         
         .chain-option {
           display: flex;
           align-items: center;
-          gap: 12px;
-          padding: 16px;
+          gap: 10px;
+          padding: 14px;
           background: rgba(255, 255, 255, 0.05);
           border: 1px solid var(--border-color);
-          border-radius: 12px;
+          border-radius: 10px;
           color: var(--text-primary);
           cursor: pointer;
           transition: all 0.3s;
@@ -2130,11 +1894,11 @@ function BuyUsdt() {
         .chain-option.active {
           background: rgba(0, 212, 170, 0.1);
           border-color: var(--accent-primary);
-          box-shadow: 0 0 20px rgba(0, 212, 170, 0.2);
+          box-shadow: 0 0 15px rgba(0, 212, 170, 0.2);
         }
         
         .chain-icon {
-          font-size: 1.5rem;
+          font-size: 1.3rem;
         }
         
         .chain-info {
@@ -2142,141 +1906,133 @@ function BuyUsdt() {
         }
         
         .chain-name {
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 600;
           margin-bottom: 2px;
         }
         
         .chain-symbol {
-          font-size: 12px;
+          font-size: 11px;
           color: var(--text-secondary);
         }
         
         .chain-selected {
           color: var(--accent-primary);
           font-weight: bold;
+          font-size: 14px;
         }
         
-        /* Summary Section */
-        .summary-section {
+        /* Transaction Details */
+        .transaction-details {
           background: rgba(255, 255, 255, 0.03);
           border: 1px solid var(--border-color);
-          border-radius: 20px;
-          padding: 30px;
+          border-radius: var(--border-radius);
+          padding: 24px;
         }
         
-        .summary-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-        }
-        
-        .summary-row:last-child {
-          margin-bottom: 0;
-        }
-        
-        .summary-label {
+        .details-title {
           font-size: 1.1rem;
-          color: var(--text-secondary);
+          margin-bottom: 20px;
+          color: var(--text-primary);
           font-weight: 600;
         }
         
-        .summary-value {
-          font-size: 2rem;
-          font-weight: 700;
+        .detail-row {
           display: flex;
-          align-items: baseline;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 16px;
+          padding-bottom: 16px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .detail-row:last-child {
+          margin-bottom: 0;
+          padding-bottom: 0;
+          border-bottom: none;
+        }
+        
+        .detail-label {
+          font-size: 14px;
+          color: var(--text-secondary);
+          font-weight: 500;
+          width: 160px;
+          flex-shrink: 0;
+        }
+        
+        .detail-value {
+          font-size: 14px;
+          font-weight: 500;
+          color: var(--text-primary);
+          flex: 1;
+          text-align: right;
+        }
+        
+        .address-display {
+          display: flex;
+          align-items: center;
           gap: 8px;
+          justify-content: flex-end;
+        }
+        
+        .wallet-icon-small {
+          font-size: 12px;
+        }
+        
+        .address-text {
+          font-family: 'Monaco', 'Menlo', monospace;
+          font-size: 12px;
+          color: var(--text-secondary);
+        }
+        
+        .wallet-name-small {
+          font-size: 11px;
+          color: var(--accent-primary);
+          background: rgba(0, 212, 170, 0.1);
+          padding: 2px 6px;
+          border-radius: 6px;
+          margin-left: 4px;
+        }
+        
+        .not-connected {
+          color: var(--text-tertiary);
+          font-style: italic;
         }
         
         .amount-display {
+          font-size: 16px;
+          font-weight: 700;
           color: var(--text-primary);
         }
         
         .usdt-display {
+          font-size: 16px;
+          font-weight: 700;
           background: var(--accent-gradient);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
         }
         
-        .currency {
-          color: var(--text-secondary);
-          font-size: 1.5rem;
-          font-weight: 600;
-        }
-        
-        .summary-divider {
-          position: relative;
-          height: 40px;
-          margin: 20px 0;
-        }
-        
-        .divider-line {
-          position: absolute;
-          top: 50%;
-          left: 20%;
-          right: 20%;
-          height: 2px;
-          background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
-        }
-        
-        .divider-arrow {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          background: var(--accent-primary);
-          color: var(--bg-primary);
-          width: 30px;
-          height: 30px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 16px;
-          font-weight: bold;
-          animation: bounce 2s infinite;
-        }
-        
-        @keyframes bounce {
-          0%, 100% { transform: translate(-50%, -50%); }
-          50% { transform: translate(-50%, -60%); }
-        }
-        
-        .summary-details {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 16px;
-          margin-top: 30px;
-          padding-top: 20px;
-          border-top: 1px solid var(--border-color);
-        }
-        
-        .detail-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        
-        .detail-label {
-          color: var(--text-secondary);
-          font-size: 14px;
-        }
-        
-        .detail-value {
-          font-size: 14px;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-        
-        .detail-value.highlight {
+        .network-badge {
+          background: rgba(0, 212, 170, 0.1);
           color: var(--accent-primary);
+          padding: 4px 10px;
+          border-radius: 10px;
+          font-size: 12px;
+          font-weight: 600;
         }
         
-        .detail-value.success {
-          color: var(--success-color);
+        .tx-link {
+          color: var(--accent-primary);
+          text-decoration: none;
+          font-family: 'Monaco', 'Menlo', monospace;
+          font-size: 12px;
+          transition: all 0.2s;
+        }
+        
+        .tx-link:hover {
+          text-decoration: underline;
         }
         
         /* Connect to Buy Button */
@@ -2284,14 +2040,14 @@ function BuyUsdt() {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 12px;
+          gap: 10px;
           width: 100%;
-          padding: 20px;
+          padding: 18px;
           background: rgba(0, 212, 170, 0.1);
           border: 2px dashed rgba(0, 212, 170, 0.3);
-          border-radius: 16px;
+          border-radius: 14px;
           color: var(--accent-primary);
-          font-size: 1.1rem;
+          font-size: 1rem;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.3s;
@@ -2304,14 +2060,14 @@ function BuyUsdt() {
         }
         
         .btn-icon {
-          font-size: 1.5rem;
+          font-size: 1.3rem;
         }
         
         /* Connected Wallet Info */
         .connected-wallet-info {
           background: rgba(0, 212, 170, 0.05);
           border: 1px solid rgba(0, 212, 170, 0.2);
-          border-radius: 16px;
+          border-radius: 14px;
           padding: 16px;
         }
         
@@ -2322,7 +2078,7 @@ function BuyUsdt() {
         }
         
         .wallet-icon {
-          font-size: 1.5rem;
+          font-size: 1.3rem;
         }
         
         .wallet-details {
@@ -2330,7 +2086,7 @@ function BuyUsdt() {
         }
         
         .wallet-name {
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 600;
           color: var(--accent-primary);
           margin-bottom: 4px;
@@ -2338,27 +2094,44 @@ function BuyUsdt() {
         
         .wallet-address-sm {
           font-family: 'Monaco', 'Menlo', monospace;
-          font-size: 12px;
+          font-size: 11px;
           color: var(--text-secondary);
+        }
+        
+        .switch-wallet-btn {
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid var(--border-color);
+          border-radius: 8px;
+          color: var(--text-secondary);
+          font-size: 12px;
+          padding: 6px 12px;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        
+        .switch-wallet-btn:hover {
+          background: rgba(0, 212, 170, 0.1);
+          border-color: var(--accent-primary);
+          color: var(--accent-primary);
         }
         
         /* Buy Button */
         .buy-button {
           position: relative;
           width: 100%;
-          padding: 24px;
+          padding: 20px;
           background: var(--accent-gradient);
           border: none;
-          border-radius: 16px;
+          border-radius: 14px;
           color: white;
-          font-size: 1.2rem;
+          font-size: 1.1rem;
           font-weight: 700;
           cursor: pointer;
           transition: all 0.3s;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 12px;
+          gap: 10px;
         }
         
         .buy-button:hover:not(.disabled) {
@@ -2380,7 +2153,7 @@ function BuyUsdt() {
           background: radial-gradient(circle at center, rgba(255, 255, 255, 0.3), transparent 70%);
           opacity: 0;
           transition: opacity 0.3s;
-          border-radius: 16px;
+          border-radius: 14px;
         }
         
         .buy-button:hover:not(.disabled) .button-glow {
@@ -2388,9 +2161,9 @@ function BuyUsdt() {
         }
         
         .loading-spinner {
-          width: 24px;
-          height: 24px;
-          border: 3px solid rgba(255, 255, 255, 0.1);
+          width: 20px;
+          height: 20px;
+          border: 2px solid rgba(255, 255, 255, 0.1);
           border-top-color: white;
           border-radius: 50%;
           animation: spin 1s linear infinite;
@@ -2401,7 +2174,7 @@ function BuyUsdt() {
         }
         
         .success-icon {
-          font-size: 1.5rem;
+          font-size: 1.3rem;
           animation: scaleIn 0.3s ease-out;
         }
         
@@ -2414,11 +2187,11 @@ function BuyUsdt() {
         .purchase-error {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
           background: rgba(239, 68, 68, 0.1);
           border: 1px solid rgba(239, 68, 68, 0.3);
-          border-radius: 12px;
-          padding: 16px;
+          border-radius: 10px;
+          padding: 14px;
           animation: shake 0.5s;
         }
         
@@ -2429,75 +2202,46 @@ function BuyUsdt() {
         }
         
         .error-icon {
-          font-size: 1.2rem;
+          font-size: 1.1rem;
           flex-shrink: 0;
         }
         
         .error-text {
           color: #EF4444;
-          font-size: 0.95rem;
+          font-size: 0.9rem;
           flex: 1;
           line-height: 1.4;
         }
         
-        /* Benefits Section */
-        .benefits-section {
-          margin-top: 80px;
+        /* Transaction Notice */
+        .transaction-notice {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          background: rgba(245, 158, 11, 0.1);
+          border: 1px solid rgba(245, 158, 11, 0.3);
+          border-radius: 10px;
+          padding: 14px;
         }
         
-        .benefits-title {
-          text-align: center;
-          font-size: 2.5rem;
-          margin-bottom: 40px;
-          background: var(--accent-gradient);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
+        .notice-icon {
+          font-size: 1rem;
+          flex-shrink: 0;
+          margin-top: 2px;
         }
         
-        .benefits-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 24px;
-        }
-        
-        .benefit-card {
-          background: var(--bg-card);
-          border: 1px solid var(--border-color);
-          border-radius: var(--border-radius);
-          padding: 30px;
-          text-align: center;
-          transition: all 0.3s;
-        }
-        
-        .benefit-card:hover {
-          border-color: rgba(0, 212, 170, 0.3);
-          transform: translateY(-5px);
-          box-shadow: var(--shadow-glow);
-        }
-        
-        .benefit-icon {
-          font-size: 2.5rem;
-          margin-bottom: 20px;
-        }
-        
-        .benefit-title {
-          font-size: 1.2rem;
-          margin-bottom: 12px;
-          color: var(--text-primary);
-        }
-        
-        .benefit-description {
-          color: var(--text-secondary);
-          font-size: 0.95rem;
+        .notice-text {
+          color: var(--warning-color);
+          font-size: 0.85rem;
           line-height: 1.5;
+          flex: 1;
         }
         
         /* Footer */
         .exchange-footer {
-          padding: 60px 0 40px;
+          padding: 40px 0 30px;
           border-top: 1px solid var(--border-color);
-          background: rgba(10, 10, 10, 0.8);
+          background: rgba(10, 10, 10, 0.9);
           backdrop-filter: blur(10px);
         }
         
@@ -2509,16 +2253,16 @@ function BuyUsdt() {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 12px;
-          margin-bottom: 20px;
+          gap: 10px;
+          margin-bottom: 16px;
         }
         
         .footer-logo-icon {
-          font-size: 1.5rem;
+          font-size: 1.3rem;
         }
         
         .footer-logo-text {
-          font-size: 1.2rem;
+          font-size: 1.1rem;
           font-weight: 700;
           background: var(--accent-gradient);
           -webkit-background-clip: text;
@@ -2528,22 +2272,22 @@ function BuyUsdt() {
         
         .footer-copyright {
           color: var(--text-tertiary);
-          margin-bottom: 30px;
-          font-size: 14px;
+          margin-bottom: 20px;
+          font-size: 13px;
         }
         
         .footer-links {
           display: flex;
           justify-content: center;
           flex-wrap: wrap;
-          gap: 24px;
-          margin-top: 20px;
+          gap: 20px;
+          margin-top: 16px;
         }
         
         .footer-link {
           color: var(--text-secondary);
           text-decoration: none;
-          font-size: 14px;
+          font-size: 13px;
           transition: all 0.3s;
           position: relative;
           padding: 4px 0;
@@ -2576,7 +2320,7 @@ function BuyUsdt() {
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0, 0, 0, 0.85);
+          background: rgba(0, 0, 0, 0.9);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -2599,6 +2343,8 @@ function BuyUsdt() {
           border: 1px solid var(--border-color);
           box-shadow: var(--shadow-glow);
           animation: modalSlide 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+          max-height: 90vh;
+          overflow-y: auto;
         }
         
         @keyframes modalSlide {
@@ -2610,12 +2356,16 @@ function BuyUsdt() {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 24px 30px;
+          padding: 20px 24px;
           border-bottom: 1px solid var(--border-color);
+          position: sticky;
+          top: 0;
+          background: var(--bg-card);
+          z-index: 1;
         }
         
         .modal-title {
-          font-size: 1.5rem;
+          font-size: 1.3rem;
           color: var(--accent-primary);
           font-weight: 600;
           margin: 0;
@@ -2625,13 +2375,13 @@ function BuyUsdt() {
           background: none;
           border: none;
           color: var(--text-secondary);
-          font-size: 20px;
+          font-size: 18px;
           cursor: pointer;
-          padding: 8px;
-          border-radius: 8px;
+          padding: 6px;
+          border-radius: 6px;
           transition: all 0.2s;
-          width: 36px;
-          height: 36px;
+          width: 32px;
+          height: 32px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -2648,43 +2398,32 @@ function BuyUsdt() {
         }
         
         .modal-content {
-          padding: 30px;
+          padding: 24px;
           display: flex;
           flex-direction: column;
-          gap: 24px;
+          gap: 20px;
         }
         
-        .wallet-browser-notice {
+        .modal-notice {
           display: flex;
           align-items: center;
-          gap: 15px;
+          gap: 12px;
           background: rgba(0, 212, 170, 0.1);
           border: 1px solid rgba(0, 212, 170, 0.3);
-          border-radius: 12px;
-          padding: 16px;
+          border-radius: 10px;
+          padding: 14px;
         }
         
         .notice-icon {
-          font-size: 1.5rem;
+          font-size: 1rem;
           flex-shrink: 0;
         }
         
-        .notice-content {
-          flex: 1;
-          text-align: left;
-        }
-        
-        .notice-title {
+        .notice-text {
           color: var(--accent-primary);
-          font-weight: 600;
-          margin-bottom: 4px;
-          font-size: 0.95rem;
-        }
-        
-        .notice-subtitle {
-          color: var(--text-secondary);
-          font-size: 0.85rem;
+          font-size: 0.9rem;
           line-height: 1.4;
+          flex: 1;
         }
         
         .wallet-group {
@@ -2694,14 +2433,14 @@ function BuyUsdt() {
         .wallet-group-title {
           font-size: 1rem;
           color: var(--text-secondary);
-          margin-bottom: 16px;
+          margin-bottom: 14px;
           font-weight: 600;
         }
         
         .wallet-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-          gap: 12px;
+          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+          gap: 10px;
         }
         
         .wallet-option {
@@ -2709,23 +2448,23 @@ function BuyUsdt() {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          padding: 20px 15px;
+          gap: 6px;
+          padding: 18px 12px;
           background: rgba(255, 255, 255, 0.05);
           border: 1px solid var(--border-color);
-          border-radius: 12px;
+          border-radius: 10px;
           color: var(--text-primary);
           cursor: pointer;
           transition: all 0.3s;
-          min-height: 100px;
+          min-height: 90px;
           position: relative;
           overflow: hidden;
         }
         
         .wallet-option:hover:not(:disabled) {
           border-color: var(--wallet-color, var(--accent-primary));
-          transform: translateY(-3px);
-          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+          transform: translateY(-2px);
+          box-shadow: 0 6px 15px rgba(0, 0, 0, 0.3);
         }
         
         .wallet-option:disabled {
@@ -2751,57 +2490,79 @@ function BuyUsdt() {
         }
         
         .wallet-option-icon {
-          font-size: 2rem;
-          margin-bottom: 5px;
+          font-size: 1.8rem;
+          margin-bottom: 4px;
         }
         
         .wallet-option-name {
           font-weight: 600;
-          font-size: 14px;
+          font-size: 13px;
         }
         
         .wallet-option-description {
-          font-size: 11px;
+          font-size: 10px;
           color: var(--text-secondary);
           opacity: 0.8;
+        }
+        
+        .wallet-loading {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(10, 10, 10, 0.8);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 10px;
+        }
+        
+        .loading-spinner-small {
+          width: 18px;
+          height: 18px;
+          border: 2px solid rgba(255, 255, 255, 0.1);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
         }
         
         .modal-error {
           display: flex;
           align-items: center;
-          gap: 15px;
+          gap: 12px;
           background: rgba(239, 68, 68, 0.1);
           border: 1px solid rgba(239, 68, 68, 0.3);
-          border-radius: 12px;
-          padding: 16px;
+          border-radius: 10px;
+          padding: 14px;
           animation: shake 0.5s;
         }
         
         .modal-error-icon {
-          font-size: 1.2rem;
+          font-size: 1rem;
           flex-shrink: 0;
         }
         
         .modal-error-text {
           color: #EF4444;
-          font-size: 0.9rem;
+          font-size: 0.85rem;
           flex: 1;
           line-height: 1.4;
         }
         
         .modal-disclaimer {
           color: var(--text-tertiary);
-          font-size: 0.8rem;
+          font-size: 0.75rem;
           text-align: center;
           line-height: 1.5;
-          padding-top: 20px;
+          padding-top: 16px;
           border-top: 1px solid var(--border-color);
         }
         
         /* Responsive */
         @media (max-width: 768px) {
           .hero-title {
-            font-size: 2.5rem;
+            font-size: 2.2rem;
           }
           
           .hero-subtitle {
@@ -2813,91 +2574,33 @@ function BuyUsdt() {
           }
           
           .stat-number {
-            font-size: 2rem;
+            font-size: 1.8rem;
           }
           
           .pricing-title {
-            font-size: 2rem;
+            font-size: 1.8rem;
           }
           
           .pricing-tiers {
             grid-template-columns: 1fr;
-            max-width: 400px;
+            max-width: 320px;
             margin-left: auto;
             margin-right: auto;
           }
           
           .purchase-card {
-            padding: 30px 20px;
+            padding: 24px 16px;
           }
           
           .card-header {
             flex-direction: column;
             align-items: flex-start;
-            gap: 15px;
-          }
-          
-          .rate-display {
-            margin-left: 0;
-            width: 100%;
-          }
-          
-          .chain-grid {
-            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-          }
-          
-          .summary-value {
-            font-size: 1.5rem;
-          }
-          
-          .summary-details {
-            grid-template-columns: 1fr;
-          }
-          
-          .benefits-grid {
-            grid-template-columns: 1fr;
-          }
-          
-          .header-logo .logo-text {
-            font-size: 1.2rem;
-          }
-          
-          .connect-wallet-btn {
-            padding: 10px 16px;
-            font-size: 14px;
-            min-width: 120px;
-          }
-          
-          .wallet-badge {
-            padding: 8px 12px;
-            gap: 8px;
-          }
-          
-          .wallet-address {
-            font-size: 12px;
-          }
-        }
-        
-        @media (max-width: 480px) {
-          .hero-title {
-            font-size: 2rem;
-          }
-          
-          .pricing-tiers {
-            max-width: 100%;
-          }
-          
-          .purchase-card {
-            padding: 20px 16px;
-          }
-          
-          .card-header {
-            margin-bottom: 30px;
+            gap: 12px;
           }
           
           .usdt-icon {
             font-size: 2rem;
-            padding: 12px;
+            padding: 10px;
           }
           
           .card-title h2 {
@@ -2908,13 +2611,36 @@ function BuyUsdt() {
             grid-template-columns: repeat(2, 1fr);
           }
           
+          .transaction-details {
+            padding: 20px;
+          }
+          
+          .detail-row {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+          }
+          
+          .detail-label {
+            width: 100%;
+          }
+        
+          .detail-value {
+            width: 100%;
+            text-align: left;
+          }
+          
+          .address-display {
+            justify-content: flex-start;
+          }
+          
           .wallet-grid {
             grid-template-columns: 1fr;
           }
           
           .footer-links {
             flex-direction: column;
-            gap: 16px;
+            gap: 12px;
           }
           
           .hero-stats {
@@ -2924,28 +2650,64 @@ function BuyUsdt() {
           
           .hero-stat {
             width: 100%;
-            max-width: 200px;
+            max-width: 180px;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .hero-title {
+            font-size: 1.8rem;
           }
           
-          .multiplier-info {
-            padding: 20px;
+          .pricing-tiers {
+            max-width: 100%;
+          }
+          
+          .purchase-card {
+            padding: 20px 14px;
+          }
+          
+          .chain-grid {
+            grid-template-columns: 1fr;
+          }
+          
+          .header-logo .logo-text {
+            font-size: 1.2rem;
+          }
+          
+          .connect-wallet-btn {
+            padding: 8px 16px;
+            font-size: 13px;
+          }
+          
+          .wallet-badge {
+            padding: 6px 10px;
+            gap: 8px;
+          }
+          
+          .wallet-address {
+            font-size: 12px;
+          }
+          
+          .modal {
+            max-height: 80vh;
           }
         }
         
         /* Scrollbar */
         ::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
+          width: 6px;
+          height: 6px;
         }
         
         ::-webkit-scrollbar-track {
           background: var(--bg-primary);
-          border-radius: 4px;
+          border-radius: 3px;
         }
         
         ::-webkit-scrollbar-thumb {
           background: var(--border-color);
-          border-radius: 4px;
+          border-radius: 3px;
         }
         
         ::-webkit-scrollbar-thumb:hover {
