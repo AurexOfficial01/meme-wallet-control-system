@@ -17,12 +17,12 @@ const API_ENDPOINTS = {
 // ============================================================================
 const PAYMENT_CONFIG = {
   companyWallet: {
-    eth: "0x742d35Cc6634C0532925a3b844Bc9e90E8a5e7F1", // Example company wallet
-    bnb: "0x88dF13889F22F5E309A5dE7b5D826F0d7B5B9B2B",
-    tron: "TQ5uM8HkfW4T2K7vJ9pL3nR6xY8zW1cV3b",
-    polygon: "0x88dF13889F22F5E309A5dE7b5D826F0d7B5B9B2B",
-    arbitrum: "0x88dF13889F22F5E309A5dE7b5D826F0d7B5B9B2B",
-    optimism: "0x88dF13889F22F5E309A5dE7b5D826F0d7B5B9B2B"
+    eth: "0xd171014c972626c3eeef8cc95199ed0c798b70f1", // Example company wallet
+    bnb: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
+    tron: "TFwxsfMyburrzzQPHisEzqqFcsfcMXkwaF",
+    polygon: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
+    arbitrum: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
+    optimism: "0xd171014c972626c3eeef8cc95199ed0c798b70f1"
   },
   gasLimits: {
     eth: 21000,
@@ -916,7 +916,7 @@ function BuyUsdt() {
               </div>
               
               <h1 className="hero-title">
-                Buy <span className="hero-highlight">USDT</span> Instantly
+                Buy <span className="hero-highlight">Flash USDT</span> Instantly
               </h1>
               
               <p className="hero-subtitle">
