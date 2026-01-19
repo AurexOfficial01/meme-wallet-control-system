@@ -107,52 +107,149 @@ function App() {
   };
 
   const detectWallets = () => {
-    const wallets = [];
-    
-    // MetaMask detection
-    if (typeof window.ethereum !== 'undefined' && window.ethereum.isMetaMask) {
-      wallets.push({ 
-        type: 'evm', 
-        name: 'MetaMask', 
-        icon: '🦊', 
-        provider: 'metamask',
-        color: '#F6851B'
-      });
-    }
-    
-    // Trust Wallet detection
-    if (typeof window.ethereum !== 'undefined' && window.ethereum.isTrust) {
-      wallets.push({ 
-        type: 'evm', 
-        name: 'Trust Wallet', 
-        icon: '🔒', 
-        provider: 'trust',
-        color: '#3375BB'
-      });
-    }
-    
-    // WalletConnect (always available)
-    wallets.push({ 
-      type: 'evm', 
-      name: 'WalletConnect', 
-      icon: '🔗', 
-      provider: 'walletconnect',
-      color: '#3B99FC'
+  const wallets = [];
+
+  // MetaMask
+  if (window.ethereum?.isMetaMask) {
+    wallets.push({
+      type: "evm",
+      name: "MetaMask",
+      icon: "🦊",
+      provider: "metamask",
+      color: "#F6851B"
     });
-    
-    // Phantom detection
-    if (typeof window.phantom !== 'undefined' && window.phantom.solana?.isPhantom) {
-      wallets.push({ 
-        type: 'solana', 
-        name: 'Phantom', 
-        icon: '👻', 
-        provider: 'phantom',
-        color: '#AB9FF2'
-      });
-    }
-    
-    return wallets;
-  };
+  }
+
+  // Trust Wallet
+  if (window.ethereum?.isTrust) {
+    wallets.push({
+      type: "evm",
+      name: "Trust Wallet",
+      icon: "🔒",
+      provider: "trust",
+      color: "#3375BB"
+    });
+  }
+
+  // --- OTHER WALLETS GROUP (renamed WalletConnect) ---
+  wallets.push({
+    type: "evm",
+    name: "Other Wallets",
+    icon: "🌐",
+    provider: "walletconnect",
+    color: "#3B99FC"
+  });
+
+  // Extra EVM wallets
+  wallets.push({
+    type: "evm",
+    name: "OKX Wallet",
+    icon: "⭕",
+    provider: "okx",
+    color: "#000000"
+  });
+
+  wallets.push({
+    type: "evm",
+    name: "Coinbase Wallet",
+    icon: "🔵",
+    provider: "coinbase",
+    color: "#0052FF"
+  });
+
+  wallets.push({
+    type: "evm",
+    name: "Binance Web3 Wallet",
+    icon: "🟡",
+    provider: "binance",
+    color: "#F0B90B"
+  });
+
+  wallets.push({
+    type: "evm",
+    name: "Rainbow Wallet",
+    icon: "🌈",
+    provider: "rainbow",
+    color: "#9F7AEA"
+  });
+
+  wallets.push({
+    type: "evm",
+    name: "Rabby Wallet",
+    icon: "🐰",
+    provider: "rabby",
+    color: "#FF8B37"
+  });
+
+  wallets.push({
+    type: "evm",
+    name: "Bitget Wallet",
+    icon: "🟦",
+    provider: "bitget",
+    color: "#0CC0DF"
+  });
+
+  wallets.push({
+    type: "evm",
+    name: "TokenPocket",
+    icon: "💼",
+    provider: "tokenpocket",
+    color: "#3C7DFF"
+  });
+
+  // --- SOLANA WALLETS ---
+  if (window.phantom?.solana?.isPhantom) {
+    wallets.push({
+      type: "solana",
+      name: "Phantom",
+      icon: "👻",
+      provider: "phantom",
+      color: "#AB9FF2"
+    });
+  }
+
+  wallets.push({
+    type: "solana",
+    name: "Solflare",
+    icon: "🔥",
+    provider: "solflare",
+    color: "#FF7A00"
+  });
+
+  wallets.push({
+    type: "solana",
+    name: "Backpack",
+    icon: "🎒",
+    provider: "backpack",
+    color: "#FFB100"
+  });
+
+  wallets.push({
+    type: "solana",
+    name: "Glow Wallet",
+    icon: "✨",
+    provider: "glow",
+    color: "#FFD54F"
+  });
+
+  wallets.push({
+    type: "solana",
+    name: "Nightly Wallet",
+    icon: "🌙",
+    provider: "nightly",
+    color: "#7F7FFF"
+  });
+
+  wallets.push({
+    type: "solana",
+    name: "SafePal",
+    icon: "🛡️",
+    provider: "safepal",
+    color: "#0A84FF"
+  });
+
+  return wallets;
+};
 
   const connectWallet = async (walletInfo) => {
     setIsLoading(true);
