@@ -7,6 +7,10 @@ export default function Purchases() {
   const [purchases, setPurchases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [approvingPurchase, setApprovingPurchase] = useState(null);
+  const [transactionHash, setTransactionHash] = useState('');
+  const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
     fetchPurchases();
@@ -24,6 +28,41 @@ export default function Purchases() {
       console.error('Error fetching purchases:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApproveClick = (purchase) => {
+    setApprovingPurchase(purchase);
+    setTransactionHash(purchase.transactionHash || '');
+    setShowModal(true);
+  };
+
+  const handleApproveSubmit = async () => {
+    if (!transactionHash.trim()) {
+      setError('Transaction hash is required');
+      return;
+    }
+
+    try {
+      const response = await axios.post(`${BACKEND_URL}/api/admin/mark-purchase-completed`, {
+        purchaseId: approvingPurchase.purchaseId,
+        transactionHash: transactionHash.trim()
+      });
+
+      if (response.data.success) {
+        setPurchases(prev => prev.map(p => 
+          p.purchaseId === approvingPurchase.purchaseId 
+            ? { ...p, status: 'completed', transactionHash }
+            : p
+        ));
+        setShowModal(false);
+        setApprovingPurchase(null);
+        setTransactionHash('');
+        setError(null);
+      }
+    } catch (err) {
+      setError('Failed to approve purchase');
+      console.error('Error approving purchase:', err);
     }
   };
 
@@ -84,6 +123,21 @@ export default function Purchases() {
     );
   };
 
+  const filteredPurchases = purchases.filter(p => {
+    if (filter === 'all') return true;
+    if (filter === 'pending') return p.status === 'pending';
+    if (filter === 'completed') return p.status === 'completed';
+    return true;
+  });
+
+  const stats = {
+    total: purchases.length,
+    pending: purchases.filter(p => p.status === 'pending').length,
+    completed: purchases.filter(p => p.status === 'completed').length,
+    totalUSD: purchases.reduce((sum, p) => sum + parseFloat(p.usdAmount || 0), 0),
+    totalUSDT: purchases.reduce((sum, p) => sum + parseFloat(p.usdtAmount || 0), 0),
+  };
+
   const styles = {
     container: {
       padding: '20px',
@@ -102,6 +156,35 @@ export default function Purchases() {
     subtitle: {
       fontSize: '16px',
       color: '#94a3b8',
+    },
+    controls: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '20px',
+      gap: '20px',
+    },
+    filterSelect: {
+      backgroundColor: '#1e293b',
+      color: '#ffffff',
+      border: '1px solid #475569',
+      borderRadius: '6px',
+      padding: '8px 16px',
+      fontSize: '14px',
+      minWidth: '150px',
+    },
+    refreshButton: {
+      backgroundColor: '#334155',
+      color: '#ffffff',
+      border: 'none',
+      padding: '10px 20px',
+      borderRadius: '6px',
+      fontWeight: '500',
+      cursor: 'pointer',
+      fontSize: '14px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
     },
     statsContainer: {
       display: 'flex',
@@ -141,20 +224,6 @@ export default function Purchases() {
       marginBottom: '20px',
       border: '1px solid #ef4444',
     },
-    refreshButton: {
-      backgroundColor: '#334155',
-      color: '#ffffff',
-      border: 'none',
-      padding: '10px 20px',
-      borderRadius: '6px',
-      fontWeight: '500',
-      cursor: 'pointer',
-      fontSize: '14px',
-      marginBottom: '20px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-    },
     tableContainer: {
       backgroundColor: '#1e293b',
       borderRadius: '12px',
@@ -176,7 +245,6 @@ export default function Purchases() {
     },
     tableRow: {
       borderBottom: '1px solid #334155',
-      transition: 'background-color 0.2s',
     },
     tableRowPending: {
       backgroundColor: 'rgba(245, 158, 11, 0.05)',
@@ -198,6 +266,74 @@ export default function Purchases() {
       color: '#10b981',
       fontWeight: '500',
     },
+    approveButton: {
+      backgroundColor: '#f5c400',
+      color: '#0f172a',
+      border: 'none',
+      padding: '6px 12px',
+      borderRadius: '4px',
+      fontWeight: '600',
+      cursor: 'pointer',
+      fontSize: '12px',
+    },
+    modalOverlay: {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.75)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+    },
+    modalContent: {
+      backgroundColor: '#1e293b',
+      borderRadius: '12px',
+      padding: '30px',
+      width: '90%',
+      maxWidth: '500px',
+      border: '1px solid #475569',
+    },
+    modalTitle: {
+      fontSize: '20px',
+      fontWeight: 'bold',
+      color: '#ffffff',
+      marginBottom: '20px',
+    },
+    modalInput: {
+      width: '100%',
+      backgroundColor: '#0f172a',
+      border: '1px solid #475569',
+      borderRadius: '6px',
+      padding: '12px',
+      color: '#ffffff',
+      fontSize: '14px',
+      marginBottom: '20px',
+      fontFamily: 'monospace',
+    },
+    modalButtons: {
+      display: 'flex',
+      gap: '12px',
+      justifyContent: 'flex-end',
+    },
+    modalButton: {
+      padding: '10px 20px',
+      borderRadius: '6px',
+      fontWeight: '600',
+      cursor: 'pointer',
+      fontSize: '14px',
+      border: 'none',
+    },
+    modalCancel: {
+      backgroundColor: '#334155',
+      color: '#ffffff',
+    },
+    modalSubmit: {
+      backgroundColor: '#f5c400',
+      color: '#0f172a',
+    },
     emptyState: {
       textAlign: 'center',
       padding: '60px 20px',
@@ -210,19 +346,11 @@ export default function Purchases() {
     },
   };
 
-  const stats = {
-    total: purchases.length,
-    pending: purchases.filter(p => p.status === 'pending').length,
-    completed: purchases.filter(p => p.status === 'completed').length,
-    totalUSD: purchases.reduce((sum, p) => sum + parseFloat(p.usdAmount || 0), 0),
-    totalUSDT: purchases.reduce((sum, p) => sum + parseFloat(p.usdtAmount || 0), 0),
-  };
-
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.title}>USDT Purchases</h1>
-        <p style={styles.subtitle}>Monitor all USDT purchase requests from users</p>
+        <p style={styles.subtitle}>Monitor and approve all USDT purchase requests</p>
       </div>
 
       <div style={styles.statsContainer}>
@@ -248,13 +376,25 @@ export default function Purchases() {
         </div>
       </div>
 
-      <button
-        style={styles.refreshButton}
-        onClick={fetchPurchases}
-        disabled={loading}
-      >
-        🔄 Refresh Purchases
-      </button>
+      <div style={styles.controls}>
+        <select 
+          style={styles.filterSelect}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        >
+          <option value="all">All Purchases</option>
+          <option value="pending">Pending Only</option>
+          <option value="completed">Completed Only</option>
+        </select>
+        
+        <button
+          style={styles.refreshButton}
+          onClick={fetchPurchases}
+          disabled={loading}
+        >
+          🔄 Refresh
+        </button>
+      </div>
 
       {error && (
         <div style={styles.error}>
@@ -265,14 +405,16 @@ export default function Purchases() {
       <div style={styles.tableContainer}>
         {loading ? (
           <div style={styles.loading}>Loading purchase requests...</div>
-        ) : purchases.length === 0 ? (
+        ) : filteredPurchases.length === 0 ? (
           <div style={styles.emptyState}>
             <div style={styles.emptyIcon}>💰</div>
             <h3 style={{ color: '#cbd5e1', marginBottom: '10px' }}>
               No Purchase Requests
             </h3>
             <p style={{ color: '#94a3b8' }}>
-              Purchase requests will appear here when users buy USDT
+              {filter !== 'all' 
+                ? `No ${filter} purchase requests found` 
+                : 'Purchase requests will appear here when users buy USDT'}
             </p>
           </div>
         ) : (
@@ -282,17 +424,18 @@ export default function Purchases() {
                 <th style={styles.tableHeader}>ID</th>
                 <th style={styles.tableHeader}>Wallet</th>
                 <th style={styles.tableHeader}>Chain</th>
-                <th style={styles.tableHeader}>USD Amount</th>
+                <th style={styles.tableHeader}>USD</th>
                 <th style={styles.tableHeader}>USDT</th>
                 <th style={styles.tableHeader}>Rate</th>
                 <th style={styles.tableHeader}>Payment</th>
                 <th style={styles.tableHeader}>Tx Hash</th>
                 <th style={styles.tableHeader}>Date</th>
                 <th style={styles.tableHeader}>Status</th>
+                <th style={styles.tableHeader}>Action</th>
               </tr>
             </thead>
             <tbody>
-              {purchases.map((purchase) => (
+              {filteredPurchases.map((purchase) => (
                 <tr
                   key={purchase.purchaseId}
                   style={{
@@ -330,12 +473,59 @@ export default function Purchases() {
                   <td style={styles.tableCell}>
                     {getStatusBadge(purchase.status)}
                   </td>
+                  <td style={styles.tableCell}>
+                    {purchase.status === 'pending' && (
+                      <button
+                        style={styles.approveButton}
+                        onClick={() => handleApproveClick(purchase)}
+                      >
+                        Approve
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {showModal && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalContent}>
+            <h3 style={styles.modalTitle}>Approve Purchase</h3>
+            <p style={{ color: '#cbd5e1', marginBottom: '20px' }}>
+              Enter transaction hash to mark purchase as completed
+            </p>
+            <input
+              style={styles.modalInput}
+              type="text"
+              placeholder="Transaction hash (0x...)"
+              value={transactionHash}
+              onChange={(e) => setTransactionHash(e.target.value)}
+              autoFocus
+            />
+            <div style={styles.modalButtons}>
+              <button
+                style={{ ...styles.modalButton, ...styles.modalCancel }}
+                onClick={() => {
+                  setShowModal(false);
+                  setApprovingPurchase(null);
+                  setTransactionHash('');
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                style={{ ...styles.modalButton, ...styles.modalSubmit }}
+                onClick={handleApproveSubmit}
+              >
+                Submit Approval
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
