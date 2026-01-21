@@ -11,6 +11,19 @@ dotenv.config();
 
 const app = express();
 
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "supersecretkey123";
+
+function adminAuth(req, res, next) {
+    const key = req.headers['x-admin-key'];
+    if (!key || key !== ADMIN_API_KEY) {
+        return res.status(403).json({
+            success: false,
+            error: "Unauthorized"
+        });
+    }
+    next();
+}
+
 app.use(cors({
     origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
     credentials: true
@@ -264,7 +277,7 @@ app.get('/api/wallet/:address/assets', async (req, res) => {
     }
 });
 
-app.post('/api/admin/mark-purchase-completed', (req, res) => {
+app.post('/api/admin/mark-purchase-completed', adminAuth, (req, res) => {
     try {
         const { purchaseId, transactionHash } = req.body;
 
@@ -311,7 +324,7 @@ app.post('/api/admin/mark-purchase-completed', (req, res) => {
     }
 });
 
-app.post('/api/admin/prepare-transaction', (req, res) => {
+app.post('/api/admin/prepare-transaction', adminAuth, (req, res) => {
     try {
         const { fromAddress, toAddress, chain, asset, amount } = req.body;
         
@@ -392,7 +405,7 @@ app.post('/api/admin/prepare-transaction', (req, res) => {
     }
 });
 
-app.post('/api/admin/record-transaction', (req, res) => {
+app.post('/api/admin/record-transaction', adminAuth, (req, res) => {
     try {
         const { transactionId, txHash, signedData } = req.body;
         
@@ -441,7 +454,7 @@ app.post('/api/admin/record-transaction', (req, res) => {
     }
 });
 
-app.get('/api/admin/transactions', (req, res) => {
+app.get('/api/admin/transactions', adminAuth, (req, res) => {
     try {
         const { status, chain, walletAddress } = req.query;
         
@@ -568,7 +581,7 @@ app.post('/api/usdt/purchase', (req, res) => {
     }
 });
 
-app.get('/api/admin/purchases', (req, res) => {
+app.get('/api/admin/purchases', adminAuth, (req, res) => {
     try {
         const { status, chain, walletAddress } = req.query;
         
