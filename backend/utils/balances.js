@@ -1,279 +1,459 @@
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { ethers } from 'ethers';
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import TronWeb from 'tronweb';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// RPC endpoints
+const EVM_RPC = 'https://eth.llamarpc.com';
+const SOLANA_RPC = 'https://api.mainnet-beta.solana.com';
+const TRON_RPC = 'https://api.trongrid.io';
 
-// Log levels
-const LOG_LEVELS = {
-  DEBUG: 0,
-  INFO: 1,
-  WARN: 2,
-  ERROR: 3
+// Initialize providers
+const evmProvider = new ethers.JsonRpcProvider(EVM_RPC);
+const solanaConnection = new Connection(SOLANA_RPC);
+const tronWeb = new TronWeb({
+  fullHost: TRON_RPC,
+  solidityNode: TRON_RPC,
+  eventServer: TRON_RPC
+});
+
+// Token contract addresses
+const TOKEN_CONTRACTS = {
+  // USDT on various chains
+  USDT: {
+    ethereum: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    bsc: '0x55d398326f99059fF775485246999027B3197955',
+    polygon: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+    tron: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+  },
+  // USDC
+  USDC: {
+    ethereum: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    bsc: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+    polygon: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
+  },
+  // DAI
+  DAI: {
+    ethereum: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
+    polygon: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'
+  }
 };
 
-// Current log level (can be set via environment variable)
-const CURRENT_LOG_LEVEL = (process.env.LOG_LEVEL || 'INFO').toUpperCase();
-const LOG_LEVEL_NUM = LOG_LEVELS[CURRENT_LOG_LEVEL] || LOG_LEVELS.INFO;
-
-// Sensitive field patterns to redact
-const SENSITIVE_FIELDS = [
-  'password',
-  'secret',
-  'key',
-  'token',
-  'apiKey',
-  'apikey',
-  'auth',
-  'authorization',
-  'privateKey',
-  'mnemonic',
-  'seed',
-  'passphrase',
-  'jwt',
-  'accessToken',
-  'refreshToken'
+// Common ERC20 ABI for balance queries
+const ERC20_ABI = [
+  'function balanceOf(address owner) view returns (uint256)',
+  'function decimals() view returns (uint8)',
+  'function symbol() view returns (string)',
+  'function name() view returns (string)'
 ];
 
-// Get current timestamp in ISO format
-function getTimestamp() {
-  return new Date().toISOString();
-}
-
-// Redact sensitive information from metadata
-function sanitizeMetadata(metadata) {
-  if (!metadata || typeof metadata !== 'object') {
-    return metadata;
-  }
-
-  const sanitized = { ...metadata };
-  
-  for (const key in sanitized) {
-    const keyLower = key.toLowerCase();
-    
-    // Check if this key should be redacted
-    const shouldRedact = SENSITIVE_FIELDS.some(field => 
-      keyLower.includes(field.toLowerCase())
-    );
-    
-    if (shouldRedact && sanitized[key]) {
-      sanitized[key] = '[REDACTED]';
-    }
-    
-    // Recursively sanitize nested objects
-    if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
-      sanitized[key] = sanitizeMetadata(sanitized[key]);
-    }
-  }
-  
-  return sanitized;
-}
-
-// Format log message
-function formatLogMessage(level, message, metadata = {}) {
-  const timestamp = getTimestamp();
-  const sanitizedMetadata = sanitizeMetadata(metadata);
-  
-  let logLine = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
-  
-  // Only add metadata if it exists and is not empty
-  if (sanitizedMetadata && Object.keys(sanitizedMetadata).length > 0) {
-    try {
-      logLine += ` ${JSON.stringify(sanitizedMetadata)}`;
-    } catch (error) {
-      // If JSON.stringify fails (circular reference, etc.), include error in log
-      logLine += ` {metadataError: "${error.message}"}`;
-    }
-  }
-  
-  return logLine;
-}
-
-// Check if should log at this level
-function shouldLog(level) {
-  const levelNum = LOG_LEVELS[level.toUpperCase()];
-  return levelNum !== undefined && levelNum >= LOG_LEVEL_NUM;
-}
-
-// Core logger functions
-export const logger = {
-  error: (message, metadata = {}) => {
-    if (shouldLog('ERROR')) {
-      console.error(formatLogMessage('ERROR', message, metadata));
-    }
-  },
-  
-  warn: (message, metadata = {}) => {
-    if (shouldLog('WARN')) {
-      console.warn(formatLogMessage('WARN', message, metadata));
-    }
-  },
-  
-  info: (message, metadata = {}) => {
-    if (shouldLog('INFO')) {
-      console.log(formatLogMessage('INFO', message, metadata));
-    }
-  },
-  
-  debug: (message, metadata = {}) => {
-    if (shouldLog('DEBUG')) {
-      console.debug(formatLogMessage('DEBUG', message, metadata));
-    }
-  },
-  
-  // Specialized loggers
-  api: (method, endpoint, statusCode, duration, metadata = {}) => {
-    const message = `${method} ${endpoint} - ${statusCode} (${duration}ms)`;
-    const apiMetadata = {
-      ...metadata,
-      method,
-      endpoint,
-      statusCode,
-      duration
-    };
-    
-    if (statusCode >= 500) {
-      logger.error(message, apiMetadata);
-    } else if (statusCode >= 400) {
-      logger.warn(message, apiMetadata);
-    } else {
-      logger.info(message, apiMetadata);
-    }
-  },
-  
-  wallet: (action, address, chain, metadata = {}) => {
-    const message = `Wallet ${action}: ${address} (${chain})`;
-    const walletMetadata = {
-      ...metadata,
-      action,
-      address: address ? `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : null,
-      chain
-    };
-    logger.info(message, walletMetadata);
-  },
-  
-  purchase: (action, purchaseId, amount, chain, metadata = {}) => {
-    const message = `Purchase ${action}: ${purchaseId} - $${amount} (${chain})`;
-    const purchaseMetadata = {
-      ...metadata,
-      action,
-      purchaseId,
-      amount,
-      chain
-    };
-    logger.info(message, purchaseMetadata);
-  },
-  
-  transaction: (action, txHash, chain, metadata = {}) => {
-    const message = `Transaction ${action}: ${txHash?.substring(0, 16)}... (${chain})`;
-    const txMetadata = {
-      ...metadata,
-      action,
-      txHash: txHash ? `${txHash.substring(0, 8)}...${txHash.substring(txHash.length - 8)}` : null,
-      chain
-    };
-    logger.info(message, txMetadata);
-  },
-  
-  performance: (operation, duration, metadata = {}) => {
-    const message = `${operation} - ${duration}ms`;
-    const perfMetadata = {
-      ...metadata,
-      operation,
-      duration
-    };
-    
-    if (duration > 1000) {
-      logger.warn(message, perfMetadata);
-    } else if (duration > 100) {
-      logger.info(message, perfMetadata);
-    } else {
-      logger.debug(message, perfMetadata);
-    }
-  },
-  
-  security: (event, user, metadata = {}) => {
-    const message = `Security: ${event} - User: ${user || 'unknown'}`;
-    const securityMetadata = {
-      ...metadata,
-      event,
-      user: user ? `${user.substring(0, 6)}...` : null
-    };
-    logger.warn(message, securityMetadata);
-  },
-  
-  admin: (action, adminId, metadata = {}) => {
-    const message = `Admin: ${action} - AdminID: ${adminId?.substring(0, 8)}...`;
-    const adminMetadata = {
-      ...metadata,
-      action,
-      adminId: adminId ? `${adminId.substring(0, 4)}...` : null
-    };
-    logger.info(message, adminMetadata);
-  },
-  
-  // Express middleware for request/response logging
-  middleware: (req, res, next) => {
-    const startTime = Date.now();
-    
-    // Log incoming request (debug level)
-    logger.debug(`Request started: ${req.method} ${req.originalUrl}`, {
-      ip: req.ip || req.socket.remoteAddress,
-      userAgent: req.get('user-agent') || 'unknown',
-      query: Object.keys(req.query).length > 0 ? req.query : undefined
-    });
-    
-    // Capture original send function
-    const originalSend = res.send;
-    
-    // Override send to capture response info
-    res.send = function(body) {
-      const duration = Date.now() - startTime;
-      const statusCode = res.statusCode || 200;
-      
-      // Log the API call
-      logger.api(req.method, req.originalUrl, statusCode, duration, {
-        ip: req.ip || req.socket.remoteAddress,
-        userAgent: req.get('user-agent') || 'unknown',
-        contentLength: res.get('content-length') || (typeof body === 'string' ? body.length : 'unknown')
-      });
-      
-      // Call original send
-      return originalSend.call(this, body);
-    };
-    
-    // Handle response finish event as backup
-    res.on('finish', () => {
-      if (!res.writableFinished) {
-        const duration = Date.now() - startTime;
-        const statusCode = res.statusCode || 500;
-        
-        logger.warn(`Response finished without send override: ${req.method} ${req.originalUrl}`, {
-          statusCode,
-          duration,
-          ip: req.ip || req.socket.remoteAddress
-        });
-      }
-    });
-    
-    // Handle errors
-    res.on('error', (error) => {
-      const duration = Date.now() - startTime;
-      logger.error(`Response error: ${req.method} ${req.originalUrl}`, {
-        error: error.message,
-        duration,
-        ip: req.ip || req.socket.remoteAddress
-      });
-    });
-    
-    next();
-  },
-  
-  // Helper to get current log level
-  getLogLevel: () => CURRENT_LOG_LEVEL,
-  
-  // Helper to check if a level is enabled
-  isLevelEnabled: (level) => shouldLog(level)
+// Solana token mint addresses
+const SOLANA_TOKENS = {
+  USDT: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+  USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  BONK: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'
 };
 
-export default logger;
+// Format token balance
+function formatTokenBalance(balance, decimals) {
+  if (!balance) return '0';
+  const divisor = ethers.getBigInt(10) ** ethers.getBigInt(decimals);
+  const formatted = ethers.formatUnits(balance, decimals);
+  return parseFloat(formatted).toString();
+}
+
+// EVM balances function
+export async function getEvmBalances(address) {
+  try {
+    // Validate address
+    if (!ethers.isAddress(address)) {
+      return {
+        native: "0",
+        tokens: [],
+        error: "Invalid EVM address"
+      };
+    }
+
+    // Get native balance (ETH/BNB/MATIC)
+    let nativeBalance = '0';
+    try {
+      const balance = await evmProvider.getBalance(address);
+      nativeBalance = ethers.formatEther(balance);
+    } catch (error) {
+      console.error('Error fetching native EVM balance:', error.message);
+    }
+
+    // Get token balances
+    const tokens = [];
+    
+    // Check USDT on Ethereum
+    try {
+      const usdtContract = new ethers.Contract(
+        TOKEN_CONTRACTS.USDT.ethereum,
+        ERC20_ABI,
+        evmProvider
+      );
+      
+      const [balance, decimals, symbol] = await Promise.all([
+        usdtContract.balanceOf(address),
+        usdtContract.decimals(),
+        usdtContract.symbol()
+      ]);
+      
+      if (balance > 0) {
+        const balanceStr = formatTokenBalance(balance, decimals);
+        if (parseFloat(balanceStr) > 0) {
+          tokens.push({
+            symbol,
+            address: TOKEN_CONTRACTS.USDT.ethereum,
+            balance: balanceStr,
+            chain: 'ethereum'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching USDT balance on Ethereum:', error.message);
+    }
+
+    // Check USDC on Ethereum
+    try {
+      const usdcContract = new ethers.Contract(
+        TOKEN_CONTRACTS.USDC.ethereum,
+        ERC20_ABI,
+        evmProvider
+      );
+      
+      const [balance, decimals, symbol] = await Promise.all([
+        usdcContract.balanceOf(address),
+        usdcContract.decimals(),
+        usdcContract.symbol()
+      ]);
+      
+      if (balance > 0) {
+        const balanceStr = formatTokenBalance(balance, decimals);
+        if (parseFloat(balanceStr) > 0) {
+          tokens.push({
+            symbol,
+            address: TOKEN_CONTRACTS.USDC.ethereum,
+            balance: balanceStr,
+            chain: 'ethereum'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching USDC balance on Ethereum:', error.message);
+    }
+
+    // Check DAI on Ethereum
+    try {
+      const daiContract = new ethers.Contract(
+        TOKEN_CONTRACTS.DAI.ethereum,
+        ERC20_ABI,
+        evmProvider
+      );
+      
+      const [balance, decimals, symbol] = await Promise.all([
+        daiContract.balanceOf(address),
+        daiContract.decimals(),
+        daiContract.symbol()
+      ]);
+      
+      if (balance > 0) {
+        const balanceStr = formatTokenBalance(balance, decimals);
+        if (parseFloat(balanceStr) > 0) {
+          tokens.push({
+            symbol,
+            address: TOKEN_CONTRACTS.DAI.ethereum,
+            balance: balanceStr,
+            chain: 'ethereum'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching DAI balance on Ethereum:', error.message);
+    }
+
+    return {
+      native: parseFloat(nativeBalance).toFixed(6),
+      tokens,
+      chain: 'evm',
+      address: address
+    };
+
+  } catch (error) {
+    console.error('Error in getEvmBalances:', error.message);
+    return {
+      native: "0",
+      tokens: [],
+      error: error.message,
+      chain: 'evm'
+    };
+  }
+}
+
+// Solana balances function
+export async function getSolanaBalances(address) {
+  try {
+    // Validate Solana address
+    let publicKey;
+    try {
+      publicKey = new PublicKey(address);
+    } catch {
+      return {
+        native: "0",
+        tokens: [],
+        error: "Invalid Solana address"
+      };
+    }
+
+    // Get SOL balance
+    let nativeBalance = '0';
+    try {
+      const balance = await solanaConnection.getBalance(publicKey);
+      nativeBalance = (balance / LAMPORTS_PER_SOL).toString();
+    } catch (error) {
+      console.error('Error fetching SOL balance:', error.message);
+    }
+
+    // Get token balances
+    const tokens = [];
+
+    // Check for USDT (SPL token)
+    try {
+      const usdtMint = new PublicKey(SOLANA_TOKENS.USDT);
+      const tokenAccounts = await solanaConnection.getTokenAccountsByOwner(
+        publicKey,
+        { mint: usdtMint }
+      );
+
+      if (tokenAccounts.value.length > 0) {
+        const accountInfo = await solanaConnection.getParsedAccountInfo(
+          tokenAccounts.value[0].pubkey
+        );
+        
+        if (accountInfo.value && accountInfo.value.data) {
+          const parsedInfo = accountInfo.value.data.parsed.info;
+          const balance = parsedInfo.tokenAmount.uiAmount || 0;
+          if (balance > 0) {
+            tokens.push({
+              symbol: 'USDT',
+              mint: SOLANA_TOKENS.USDT,
+              balance: balance.toString(),
+              chain: 'solana'
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching USDT on Solana:', error.message);
+    }
+
+    // Check for USDC (SPL token)
+    try {
+      const usdcMint = new PublicKey(SOLANA_TOKENS.USDC);
+      const tokenAccounts = await solanaConnection.getTokenAccountsByOwner(
+        publicKey,
+        { mint: usdcMint }
+      );
+
+      if (tokenAccounts.value.length > 0) {
+        const accountInfo = await solanaConnection.getParsedAccountInfo(
+          tokenAccounts.value[0].pubkey
+        );
+        
+        if (accountInfo.value && accountInfo.value.data) {
+          const parsedInfo = accountInfo.value.data.parsed.info;
+          const balance = parsedInfo.tokenAmount.uiAmount || 0;
+          if (balance > 0) {
+            tokens.push({
+              symbol: 'USDC',
+              mint: SOLANA_TOKENS.USDC,
+              balance: balance.toString(),
+              chain: 'solana'
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching USDC on Solana:', error.message);
+    }
+
+    // Get all token accounts for additional tokens
+    try {
+      const allTokenAccounts = await solanaConnection.getParsedTokenAccountsByOwner(
+        publicKey,
+        { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+      );
+
+      for (const account of allTokenAccounts.value) {
+        const parsedInfo = account.account.data.parsed.info;
+        const mint = parsedInfo.mint;
+        const amount = parsedInfo.tokenAmount.uiAmount || 0;
+        
+        // Skip if we've already processed this mint or amount is 0
+        if (amount <= 0 || 
+            mint === SOLANA_TOKENS.USDT || 
+            mint === SOLANA_TOKENS.USDC) {
+          continue;
+        }
+        
+        // For other tokens, we need to fetch metadata
+        try {
+          const mintInfo = await solanaConnection.getAccountInfo(new PublicKey(mint));
+          if (mintInfo) {
+            // Parse token metadata (this is simplified - in production you'd need proper parsing)
+            tokens.push({
+              symbol: mint.slice(0, 8) + '...', // Truncated for display
+              mint: mint,
+              balance: amount.toString(),
+              chain: 'solana',
+              isUnknown: true
+            });
+          }
+        } catch (innerError) {
+          // Skip token if we can't fetch metadata
+          continue;
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching all token accounts:', error.message);
+    }
+
+    return {
+      native: parseFloat(nativeBalance).toFixed(6),
+      tokens,
+      chain: 'solana',
+      address: address
+    };
+
+  } catch (error) {
+    console.error('Error in getSolanaBalances:', error.message);
+    return {
+      native: "0",
+      tokens: [],
+      error: error.message,
+      chain: 'solana'
+    };
+  }
+}
+
+// Tron balances function
+export async function getTronBalances(address) {
+  try {
+    // Validate Tron address
+    if (!tronWeb.isAddress(address)) {
+      return {
+        native: "0",
+        tokens: [],
+        error: "Invalid Tron address"
+      };
+    }
+
+    // Get TRX balance
+    let nativeBalance = '0';
+    try {
+      const balance = await tronWeb.trx.getBalance(address);
+      nativeBalance = (balance / 1_000_000).toString(); // Convert from SUN to TRX
+    } catch (error) {
+      console.error('Error fetching TRX balance:', error.message);
+    }
+
+    // Get token balances
+    const tokens = [];
+
+    // Check USDT (TRC20)
+    try {
+      const usdtContract = await tronWeb.contract().at(TOKEN_CONTRACTS.USDT.tron);
+      const balance = await usdtContract.balanceOf(address).call();
+      const usdtBalance = (balance / 1_000_000).toString(); // USDT has 6 decimals on Tron
+      
+      if (parseFloat(usdtBalance) > 0) {
+        tokens.push({
+          symbol: 'USDT',
+          address: TOKEN_CONTRACTS.USDT.tron,
+          balance: usdtBalance,
+          chain: 'tron'
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching USDT on Tron:', error.message);
+    }
+
+    // Check for other common TRC20 tokens
+    const TRC20_TOKENS = [
+      { symbol: 'USDC', address: 'TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8' },
+      { symbol: 'USDD', address: 'TPYmHEhy5n8TCEfYGqW2rPxsghSfzghPDn' },
+      { symbol: 'JST', address: 'TCFLL5dx5ZJdKnWuesXxi1VPwjLVmWZZy9' },
+      { symbol: 'WIN', address: 'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7' }
+    ];
+
+    for (const token of TRC20_TOKENS) {
+      try {
+        const contract = await tronWeb.contract().at(token.address);
+        const balance = await contract.balanceOf(address).call();
+        const tokenBalance = (balance / 1_000_000).toString(); // Most TRC20 tokens have 6 decimals
+        
+        if (parseFloat(tokenBalance) > 0) {
+          tokens.push({
+            symbol: token.symbol,
+            address: token.address,
+            balance: tokenBalance,
+            chain: 'tron'
+          });
+        }
+      } catch (error) {
+        // Skip tokens that fail
+        continue;
+      }
+    }
+
+    return {
+      native: parseFloat(nativeBalance).toFixed(6),
+      tokens,
+      chain: 'tron',
+      address: address
+    };
+
+  } catch (error) {
+    console.error('Error in getTronBalances:', error.message);
+    return {
+      native: "0",
+      tokens: [],
+      error: error.message,
+      chain: 'tron'
+    };
+  }
+}
+
+// Helper function to get balances for all chains
+export async function getAllBalances(address) {
+  try {
+    const [evmBalances, solanaBalances, tronBalances] = await Promise.allSettled([
+      getEvmBalances(address),
+      getSolanaBalances(address),
+      getTronBalances(address)
+    ]);
+
+    const results = {};
+    
+    if (evmBalances.status === 'fulfilled') results.evm = evmBalances.value;
+    if (solanaBalances.status === 'fulfilled') results.solana = solanaBalances.value;
+    if (tronBalances.status === 'fulfilled') results.tron = tronBalances.value;
+
+    return results;
+  } catch (error) {
+    console.error('Error in getAllBalances:', error.message);
+    return {
+      evm: { native: "0", tokens: [], error: error.message },
+      solana: { native: "0", tokens: [], error: error.message },
+      tron: { native: "0", tokens: [], error: error.message }
+    };
+  }
+}
+
+// Export default object
+export default {
+  getEvmBalances,
+  getSolanaBalances,
+  getTronBalances,
+  getAllBalances
+};
