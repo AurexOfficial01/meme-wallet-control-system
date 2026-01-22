@@ -2,23 +2,19 @@
   "version": 2,
   "builds": [
     {
-      "src": "backend/server.js",
+      "src": "server.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "backend/server.js"
+      "dest": "/server.js"
     }
   ],
   "functions": {
-    "backend/server.js": {
-      "maxDuration": 30,
-      "memory": 1024
+    "server.js": {
+      "maxDuration": 30
     }
-  },
-  "env": {
-    "NODE_ENV": "production"
   }
 }
