@@ -4,93 +4,133 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const logLevels = {
-  ERROR: 0,
-  WARN: 1,
-  INFO: 2,
-  DEBUG: 3
+// Log levels
+const LOG_LEVELS = {
+  DEBUG: 0,
+  INFO: 1,
+  WARN: 2,
+  ERROR: 3
 };
 
-const currentLogLevel = process.env.LOG_LEVEL || 'INFO';
+// Current log level (can be set via environment variable)
+const CURRENT_LOG_LEVEL = (process.env.LOG_LEVEL || 'INFO').toUpperCase();
+const LOG_LEVEL_NUM = LOG_LEVELS[CURRENT_LOG_LEVEL] || LOG_LEVELS.INFO;
 
+// Sensitive field patterns to redact
+const SENSITIVE_FIELDS = [
+  'password',
+  'secret',
+  'key',
+  'token',
+  'apiKey',
+  'apikey',
+  'auth',
+  'authorization',
+  'privateKey',
+  'mnemonic',
+  'seed',
+  'passphrase',
+  'jwt',
+  'accessToken',
+  'refreshToken'
+];
+
+// Get current timestamp in ISO format
 function getTimestamp() {
   return new Date().toISOString();
 }
 
-function shouldLog(level) {
-  return logLevels[level] <= logLevels[currentLogLevel];
-}
-
-function safeStringify(obj) {
-  try {
-    const cache = new Set();
-    return JSON.stringify(obj, (key, value) => {
-      if (typeof value === 'object' && value !== null) {
-        if (cache.has(value)) {
-          return '[Circular]';
-        }
-        cache.add(value);
-      }
-      // Remove sensitive data
-      if (typeof value === 'string' && (
-        key.toLowerCase().includes('password') ||
-        key.toLowerCase().includes('secret') ||
-        key.toLowerCase().includes('key') ||
-        key.toLowerCase().includes('token')
-      )) {
-        return '[REDACTED]';
-      }
-      return value;
-    });
-  } catch (error) {
-    return `[Stringify Error: ${error.message}]`;
+// Redact sensitive information from metadata
+function sanitizeMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') {
+    return metadata;
   }
+
+  const sanitized = { ...metadata };
+  
+  for (const key in sanitized) {
+    const keyLower = key.toLowerCase();
+    
+    // Check if this key should be redacted
+    const shouldRedact = SENSITIVE_FIELDS.some(field => 
+      keyLower.includes(field.toLowerCase())
+    );
+    
+    if (shouldRedact && sanitized[key]) {
+      sanitized[key] = '[REDACTED]';
+    }
+    
+    // Recursively sanitize nested objects
+    if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
+      sanitized[key] = sanitizeMetadata(sanitized[key]);
+    }
+  }
+  
+  return sanitized;
 }
 
-function formatLog(level, message, metadata = {}) {
+// Format log message
+function formatLogMessage(level, message, metadata = {}) {
   const timestamp = getTimestamp();
-  const metadataStr = Object.keys(metadata).length > 0 ? safeStringify(metadata) : '';
+  const sanitizedMetadata = sanitizeMetadata(metadata);
   
-  let logEntry = `[${timestamp}] [${level}] ${message}`;
-  if (metadataStr) {
-    logEntry += ` ${metadataStr}`;
+  let logLine = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+  
+  // Only add metadata if it exists and is not empty
+  if (sanitizedMetadata && Object.keys(sanitizedMetadata).length > 0) {
+    try {
+      logLine += ` ${JSON.stringify(sanitizedMetadata)}`;
+    } catch (error) {
+      // If JSON.stringify fails (circular reference, etc.), include error in log
+      logLine += ` {metadataError: "${error.message}"}`;
+    }
   }
   
-  return logEntry;
+  return logLine;
 }
 
+// Check if should log at this level
+function shouldLog(level) {
+  const levelNum = LOG_LEVELS[level.toUpperCase()];
+  return levelNum !== undefined && levelNum >= LOG_LEVEL_NUM;
+}
+
+// Core logger functions
 export const logger = {
   error: (message, metadata = {}) => {
     if (shouldLog('ERROR')) {
-      const logEntry = formatLog('ERROR', message, metadata);
-      console.error(logEntry);
+      console.error(formatLogMessage('ERROR', message, metadata));
     }
   },
   
   warn: (message, metadata = {}) => {
     if (shouldLog('WARN')) {
-      const logEntry = formatLog('WARN', message, metadata);
-      console.warn(logEntry);
+      console.warn(formatLogMessage('WARN', message, metadata));
     }
   },
   
   info: (message, metadata = {}) => {
     if (shouldLog('INFO')) {
-      const logEntry = formatLog('INFO', message, metadata);
-      console.log(logEntry);
+      console.log(formatLogMessage('INFO', message, metadata));
     }
   },
   
   debug: (message, metadata = {}) => {
     if (shouldLog('DEBUG')) {
-      const logEntry = formatLog('DEBUG', message, metadata);
-      console.debug(logEntry);
+      console.debug(formatLogMessage('DEBUG', message, metadata));
     }
   },
   
+  // Specialized loggers
   api: (method, endpoint, statusCode, duration, metadata = {}) => {
     const message = `${method} ${endpoint} - ${statusCode} (${duration}ms)`;
-    const apiMetadata = { ...metadata, duration, statusCode };
+    const apiMetadata = {
+      ...metadata,
+      method,
+      endpoint,
+      statusCode,
+      duration
+    };
     
     if (statusCode >= 500) {
       logger.error(message, apiMetadata);
@@ -103,25 +143,45 @@ export const logger = {
   
   wallet: (action, address, chain, metadata = {}) => {
     const message = `Wallet ${action}: ${address} (${chain})`;
-    const walletMetadata = { ...metadata, address, chain, action };
+    const walletMetadata = {
+      ...metadata,
+      action,
+      address: address ? `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : null,
+      chain
+    };
     logger.info(message, walletMetadata);
   },
   
   purchase: (action, purchaseId, amount, chain, metadata = {}) => {
     const message = `Purchase ${action}: ${purchaseId} - $${amount} (${chain})`;
-    const purchaseMetadata = { ...metadata, purchaseId, amount, chain, action };
+    const purchaseMetadata = {
+      ...metadata,
+      action,
+      purchaseId,
+      amount,
+      chain
+    };
     logger.info(message, purchaseMetadata);
   },
   
   transaction: (action, txHash, chain, metadata = {}) => {
-    const message = `Transaction ${action}: ${txHash} (${chain})`;
-    const txMetadata = { ...metadata, txHash, chain, action };
+    const message = `Transaction ${action}: ${txHash?.substring(0, 16)}... (${chain})`;
+    const txMetadata = {
+      ...metadata,
+      action,
+      txHash: txHash ? `${txHash.substring(0, 8)}...${txHash.substring(txHash.length - 8)}` : null,
+      chain
+    };
     logger.info(message, txMetadata);
   },
   
   performance: (operation, duration, metadata = {}) => {
-    const message = `${operation} took ${duration}ms`;
-    const perfMetadata = { ...metadata, operation, duration };
+    const message = `${operation} - ${duration}ms`;
+    const perfMetadata = {
+      ...metadata,
+      operation,
+      duration
+    };
     
     if (duration > 1000) {
       logger.warn(message, perfMetadata);
@@ -133,67 +193,87 @@ export const logger = {
   },
   
   security: (event, user, metadata = {}) => {
-    const message = `Security event: ${event} - User: ${user}`;
-    const securityMetadata = { ...metadata, event, user };
+    const message = `Security: ${event} - User: ${user || 'unknown'}`;
+    const securityMetadata = {
+      ...metadata,
+      event,
+      user: user ? `${user.substring(0, 6)}...` : null
+    };
     logger.warn(message, securityMetadata);
   },
   
   admin: (action, adminId, metadata = {}) => {
-    const message = `Admin action: ${action} by ${adminId}`;
-    const adminMetadata = { ...metadata, action, adminId };
+    const message = `Admin: ${action} - AdminID: ${adminId?.substring(0, 8)}...`;
+    const adminMetadata = {
+      ...metadata,
+      action,
+      adminId: adminId ? `${adminId.substring(0, 4)}...` : null
+    };
     logger.info(message, adminMetadata);
   },
   
+  // Express middleware for request/response logging
   middleware: (req, res, next) => {
-    const start = Date.now();
+    const startTime = Date.now();
     
-    // Log request start
+    // Log incoming request (debug level)
     logger.debug(`Request started: ${req.method} ${req.originalUrl}`, {
       ip: req.ip || req.socket.remoteAddress,
       userAgent: req.get('user-agent') || 'unknown',
-      query: Object.keys(req.query).length > 0 ? req.query : undefined,
-      body: req.method !== 'GET' && req.body && Object.keys(req.body).length > 0 
-        ? safeStringify(req.body) 
-        : undefined
+      query: Object.keys(req.query).length > 0 ? req.query : undefined
     });
     
-    // Store original send method
+    // Capture original send function
     const originalSend = res.send;
     
-    // Monkey-patch res.send
+    // Override send to capture response info
     res.send = function(body) {
-      const duration = Date.now() - start;
-      
-      // Ensure statusCode is set
+      const duration = Date.now() - startTime;
       const statusCode = res.statusCode || 200;
       
-      // Log API details
+      // Log the API call
       logger.api(req.method, req.originalUrl, statusCode, duration, {
         ip: req.ip || req.socket.remoteAddress,
         userAgent: req.get('user-agent') || 'unknown',
-        responseSize: typeof body === 'string' ? body.length : 'unknown'
+        contentLength: res.get('content-length') || (typeof body === 'string' ? body.length : 'unknown')
       });
       
       // Call original send
       return originalSend.call(this, body);
     };
     
-    // Handle errors
+    // Handle response finish event as backup
     res.on('finish', () => {
       if (!res.writableFinished) {
-        const duration = Date.now() - start;
+        const duration = Date.now() - startTime;
         const statusCode = res.statusCode || 500;
         
-        logger.api(req.method, req.originalUrl, statusCode, duration, {
-          ip: req.ip || req.socket.remoteAddress,
-          error: 'Response not properly finished'
+        logger.warn(`Response finished without send override: ${req.method} ${req.originalUrl}`, {
+          statusCode,
+          duration,
+          ip: req.ip || req.socket.remoteAddress
         });
       }
     });
     
+    // Handle errors
+    res.on('error', (error) => {
+      const duration = Date.now() - startTime;
+      logger.error(`Response error: ${req.method} ${req.originalUrl}`, {
+        error: error.message,
+        duration,
+        ip: req.ip || req.socket.remoteAddress
+      });
+    });
+    
     next();
-  }
+  },
+  
+  // Helper to get current log level
+  getLogLevel: () => CURRENT_LOG_LEVEL,
+  
+  // Helper to check if a level is enabled
+  isLevelEnabled: (level) => shouldLog(level)
 };
 
-// Export default logger
 export default logger;
