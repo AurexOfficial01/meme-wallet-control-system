@@ -12,15 +12,11 @@ const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
 const PURCHASES_FILE = path.join(DATA_DIR, 'purchases.json');
 const TRANSACTIONS_FILE = path.join(DATA_DIR, 'transactions.json');
 
-// Ensure data directory exists
+// Ensure data directory exists - Vercel safe version
 export function ensureDataFiles() {
   try {
-    // Create data directory if it doesn't exist
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-
-    // Initialize files with empty arrays if they don't exist
+    // Don't try to create directory on Vercel
+    // Just check if files exist and initialize them
     const files = [
       { path: WALLETS_FILE, data: [] },
       { path: PURCHASES_FILE, data: [] },
@@ -28,16 +24,16 @@ export function ensureDataFiles() {
     ];
 
     files.forEach(({ path: filePath, data }) => {
-      if (!fs.existsSync(filePath)) {
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-      } else {
-        // Validate existing file has valid JSON
+      try {
+        // Try to read existing file
+        const content = fs.readFileSync(filePath, 'utf8');
+        JSON.parse(content);
+      } catch (error) {
+        // If file doesn't exist or is corrupted, create it
         try {
-          const content = fs.readFileSync(filePath, 'utf8');
-          JSON.parse(content);
-        } catch (error) {
-          // If corrupted, reset to empty array
           fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        } catch (writeError) {
+          console.error(`Failed to write file ${filePath}:`, writeError.message);
         }
       }
     });
@@ -48,9 +44,6 @@ export function ensureDataFiles() {
     return false;
   }
 }
-
-// Initialize files on import
-ensureDataFiles();
 
 // Load wallets from JSON file
 export function loadWallets() {
@@ -78,14 +71,6 @@ export function loadWallets() {
     return parsed;
   } catch (error) {
     console.error('Error loading wallets:', error.message);
-    
-    // If file is corrupted, reset it
-    try {
-      saveWallets([]);
-    } catch (resetError) {
-      console.error('Failed to reset wallets file:', resetError.message);
-    }
-    
     return [];
   }
 }
@@ -95,11 +80,6 @@ export function saveWallets(wallets) {
   try {
     // Ensure wallets is an array
     const data = Array.isArray(wallets) ? wallets : [];
-    
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
     
     fs.writeFileSync(WALLETS_FILE, JSON.stringify(data, null, 2));
     return true;
@@ -135,14 +115,6 @@ export function loadPurchases() {
     return parsed;
   } catch (error) {
     console.error('Error loading purchases:', error.message);
-    
-    // If file is corrupted, reset it
-    try {
-      savePurchases([]);
-    } catch (resetError) {
-      console.error('Failed to reset purchases file:', resetError.message);
-    }
-    
     return [];
   }
 }
@@ -152,11 +124,6 @@ export function savePurchases(purchases) {
   try {
     // Ensure purchases is an array
     const data = Array.isArray(purchases) ? purchases : [];
-    
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
     
     fs.writeFileSync(PURCHASES_FILE, JSON.stringify(data, null, 2));
     return true;
@@ -192,14 +159,6 @@ export function loadTransactions() {
     return parsed;
   } catch (error) {
     console.error('Error loading transactions:', error.message);
-    
-    // If file is corrupted, reset it
-    try {
-      saveTransactions([]);
-    } catch (resetError) {
-      console.error('Failed to reset transactions file:', resetError.message);
-    }
-    
     return [];
   }
 }
@@ -210,11 +169,6 @@ export function saveTransactions(transactions) {
     // Ensure transactions is an array
     const data = Array.isArray(transactions) ? transactions : [];
     
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    
     fs.writeFileSync(TRANSACTIONS_FILE, JSON.stringify(data, null, 2));
     return true;
   } catch (error) {
@@ -223,118 +177,6 @@ export function saveTransactions(transactions) {
   }
 }
 
-// Helper function to add a new wallet
-export function addWallet(walletData) {
-  try {
-    const wallets = loadWallets();
-    const newWallet = {
-      id: Date.now().toString(),
-      ...walletData,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    
-    wallets.push(newWallet);
-    saveWallets(wallets);
-    return newWallet;
-  } catch (error) {
-    console.error('Error adding wallet:', error.message);
-    return null;
-  }
-}
-
-// Helper function to add a new purchase
-export function addPurchase(purchaseData) {
-  try {
-    const purchases = loadPurchases();
-    const newPurchase = {
-      id: Date.now().toString(),
-      ...purchaseData,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      status: purchaseData.status || 'pending'
-    };
-    
-    purchases.push(newPurchase);
-    savePurchases(purchases);
-    return newPurchase;
-  } catch (error) {
-    console.error('Error adding purchase:', error.message);
-    return null;
-  }
-}
-
-// Helper function to add a new transaction
-export function addTransaction(transactionData) {
-  try {
-    const transactions = loadTransactions();
-    const newTransaction = {
-      id: Date.now().toString(),
-      ...transactionData,
-      timestamp: new Date().toISOString()
-    };
-    
-    transactions.push(newTransaction);
-    saveTransactions(transactions);
-    return newTransaction;
-  } catch (error) {
-    console.error('Error adding transaction:', error.message);
-    return null;
-  }
-}
-
-// Helper function to update purchase status
-export function updatePurchaseStatus(purchaseId, status, transactionHash = null) {
-  try {
-    const purchases = loadPurchases();
-    const purchaseIndex = purchases.findIndex(p => p.id === purchaseId);
-    
-    if (purchaseIndex === -1) {
-      return null;
-    }
-    
-    const purchase = purchases[purchaseIndex];
-    purchase.status = status;
-    purchase.updatedAt = new Date().toISOString();
-    
-    if (transactionHash) {
-      purchase.transactionHash = transactionHash;
-    }
-    
-    savePurchases(purchases);
-    return purchase;
-  } catch (error) {
-    console.error('Error updating purchase status:', error.message);
-    return null;
-  }
-}
-
-// Helper function to get purchase by ID
-export function getPurchase(purchaseId) {
-  try {
-    const purchases = loadPurchases();
-    return purchases.find(p => p.id === purchaseId) || null;
-  } catch (error) {
-    console.error('Error getting purchase:', error.message);
-    return null;
-  }
-}
-
-// Helper function to get wallet by address and chain
-export function getWallet(address, chain) {
-  try {
-    const wallets = loadWallets();
-    return wallets.find(w => 
-      w.address.toLowerCase() === address.toLowerCase() && 
-      w.chain === chain.toLowerCase()
-    ) || null;
-  } catch (error) {
-    console.error('Error getting wallet:', error.message);
-    return null;
-  }
-}
-
-// Export default object
 export default {
   ensureDataFiles,
   loadWallets,
@@ -342,11 +184,5 @@ export default {
   loadPurchases,
   savePurchases,
   loadTransactions,
-  saveTransactions,
-  addWallet,
-  addPurchase,
-  addTransaction,
-  updatePurchaseStatus,
-  getPurchase,
-  getWallet
+  saveTransactions
 };
