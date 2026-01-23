@@ -28,7 +28,7 @@ if (detection.chain === "solana") {
 
   try {
     await provider.connect();
-    address = provider.publicKey.toString();
+    address = provider.publicKey?.toString();
   } catch (error) {
     throw new Error(`Failed to connect to Solana wallet: ${error.message}`);
   }
