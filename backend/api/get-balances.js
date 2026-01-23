@@ -1,101 +1,74 @@
+import fetch from "node-fetch";
+
 export default async function handler(req, res) {
-  const { address, chain } = req.query;
+  const { address, chain } = req.query || {};
 
   if (!address || !chain) {
-    return res.status(400).json({ success: false, msg: "Missing address/chain" });
+    return res.status(400).json({ success: false, error: "Missing params" });
   }
 
   try {
-    const RPC = {
-      evm: "https://rpc.ankr.com/eth",
-      solana: "https://api.mainnet-beta.solana.com",
-      tron: "https://api.trongrid.io"
-    };
+    const chainLower = chain.toLowerCase();
 
-    let native = 0;
-    let usdt = 0;
+    // ================================
+    // EVM CHAINS (ETH, BSC, POLYGON)
+    // ================================
+    if (chainLower === "evm") {
+      const url = `https://api.blockcypher.com/v1/eth/main/addrs/${address}/balance`;
+      const r = await fetch(url);
+      const j = await r.json();
 
-    // =====================================
-    // EVM BALANCE (ETH + USDT)
-    // =====================================
-    if (chain === "evm") {
-      // Native ETH
-      const bal = await fetch(RPC.evm, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "eth_getBalance",
-          params: [address, "latest"]
-        })
-      }).then(r => r.json());
-
-      native = parseInt(bal.result, 16) / 1e18;
-
-      // USDT ERC20
-      const contract = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
-      const methodSelector = "0x70a08231"; // balanceOf
-      const paddedAddress = address.toLowerCase().replace("0x", "").padStart(64, "0");
-
-      const usdtRes = await fetch(RPC.evm, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 2,
-          method: "eth_call",
-          params: [
-            {
-              to: contract,
-              data: methodSelector + paddedAddress
-            },
-            "latest"
-          ]
-        })
-      }).then(r => r.json());
-
-      usdt = parseInt(usdtRes.result, 16) / 1e6;
+      return res.json({
+        success: true,
+        native: j.balance / 1e18, // ETH
+        usdt: null
+      });
     }
 
-    // =====================================
-    // SOLANA BALANCE (Native Only)
-    // =====================================
-    if (chain === "solana") {
-      const sol = await fetch(RPC.solana, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getBalance",
-          params: [address]
-        })
-      }).then(r => r.json());
+    // ================================
+    // SOLANA BALANCE
+    // ================================
+    if (chainLower === "solana") {
+      const rpc = "https://api.mainnet-beta.solana.com";
+      const body = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getBalance",
+        params: [address]
+      };
 
-      native = sol.result?.value ? sol.result.value / 1e9 : 0;
+      const r = await fetch(rpc, {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" }
+      });
+
+      const j = await r.json();
+
+      return res.json({
+        success: true,
+        native: j.result.value / 1e9,
+        usdt: null
+      });
     }
 
-    // =====================================
-    // TRON BALANCE (Native Only)
-    // =====================================
-    if (chain === "tron") {
-      const tron = await fetch(`${RPC.tron}/wallet/getaccount`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address })
-      }).then(r => r.json());
+    // ================================
+    // TRON BALANCE
+    // ================================
+    if (chainLower === "tron") {
+      const url = `https://api.trongrid.io/v1/accounts/${address}`;
+      const r = await fetch(url);
+      const j = await r.json();
 
-      native = tron.balance ? tron.balance / 1e6 : 0;
+      return res.json({
+        success: true,
+        native: j.data?.[0]?.balance / 1e6 || 0,
+        usdt: null
+      });
     }
 
-    return res.status(200).json({
-      success: true,
-      native,
-      usdt
-    });
-
-  } catch (e) {
-    res.status(500).json({ success: false, msg: e.message });
+    return res.json({ success: false, error: "Invalid chain" });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 }
