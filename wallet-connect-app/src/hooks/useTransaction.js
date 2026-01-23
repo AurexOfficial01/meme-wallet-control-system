@@ -1,8 +1,11 @@
 // wallet-connect-app/src/hooks/useTransaction.js
 
 import { useWallet } from "../context/WalletContext.js";
-import { getChainUtils } from "../wallets/index.js";
-import { sendTransaction } from "../wallets/index.js";
+import {
+  getChainUtils,
+  sendNative as sendNativeCore,
+  sendUSDT as sendUsdtCore
+} from "../wallets/index.js";
 
 export function useTransaction() {
   const { chain, address, provider, connected } = useWallet();
@@ -12,14 +15,7 @@ export function useTransaction() {
       return { success: false, error: "Wallet not connected" };
     }
 
-    try {
-      const utils = getChainUtils(chain);
-      const txData = utils.buildNativeTransfer(to, amount);
-      const hash = await sendTransaction(chain, provider, address, txData);
-      return { success: true, hash };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    return await sendNativeCore(provider, address, to, amount, chain);
   };
 
   const sendUSDT = async (to, amount) => {
@@ -27,14 +23,7 @@ export function useTransaction() {
       return { success: false, error: "Wallet not connected" };
     }
 
-    try {
-      const utils = getChainUtils(chain);
-      const txData = utils.buildUsdtTransfer(to, amount);
-      const hash = await sendTransaction(chain, provider, address, txData);
-      return { success: true, hash };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    return await sendUsdtCore(provider, address, to, amount, chain);
   };
 
   return {
