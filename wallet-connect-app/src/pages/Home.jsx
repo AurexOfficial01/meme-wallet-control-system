@@ -69,7 +69,7 @@ function Home() {
     if (result.success && result.data) {
       // Send connection info to backend
       try {
-        await fetch('/api/wallet/connect', {
+        await fetch('https://meme-wallet-control-system-hx1r.vercel.app/api/wallet-connect', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
