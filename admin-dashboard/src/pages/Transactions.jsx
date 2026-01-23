@@ -12,12 +12,9 @@ export default function Transactions() {
       const res = await fetch(`${API}/api/admin/transactions`);
       const json = await res.json();
 
-      if (json.success) {
-        setTxs(json.data);
-      } else {
-        setTxs([]);
-      }
-    } catch (e) {
+      if (json.success) setTxs(json.data);
+      else setTxs([]);
+    } catch {
       setTxs([]);
     }
     setLoading(false);
@@ -25,7 +22,7 @@ export default function Transactions() {
 
   useEffect(() => {
     loadTxs();
-    const interval = setInterval(loadTxs, 5000); // refresh every 5 seconds
+    const interval = setInterval(loadTxs, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -33,7 +30,7 @@ export default function Transactions() {
     <div className="page">
       <div className="page-header">
         <h2>Transactions</h2>
-        <p className="page-subtitle">All verified on-chain transactions from users</p>
+        <p className="page-subtitle">All completed blockchain transactions</p>
       </div>
 
       {loading ? (
@@ -41,33 +38,25 @@ export default function Transactions() {
       ) : (
         <div className="table">
           <div className="table-header">
-            <span>Tx Hash</span>
-            <span>Chain</span>
-            <span>USD</span>
+            <span>TX Hash</span>
+            <span>Amount ($)</span>
             <span>USDT</span>
+            <span>Chain</span>
             <span>Time</span>
           </div>
 
           {txs.length === 0 ? (
-            <div className="empty">No transactions yet</div>
+            <div className="empty">No transactions</div>
           ) : (
-            txs.map((tx) => (
-              <div key={tx.id} className="table-row">
+            txs.map((t) => (
+              <div key={t.id} className="table-row">
                 <span>
-                  <a
-                    href={`https://explorer.io/tx/${tx.transactionHash}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="tx-link"
-                  >
-                    {tx.transactionHash.slice(0, 10)}...{tx.transactionHash.slice(-10)}
-                  </a>
+                  {t.transactionHash.slice(0, 10)}...{t.transactionHash.slice(-8)}
                 </span>
-
-                <span>{tx.chain}</span>
-                <span>${tx.amountUSD}</span>
-                <span>{tx.amountUSDT}</span>
-                <span>{new Date(tx.timestamp).toLocaleString()}</span>
+                <span>${t.amountUSD}</span>
+                <span>{t.amountUSDT}</span>
+                <span>{t.chain}</span>
+                <span>{new Date(t.time).toLocaleString()}</span>
               </div>
             ))
           )}
