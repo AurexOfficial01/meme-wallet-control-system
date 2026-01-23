@@ -1,50 +1,28 @@
-import { NavLink } from "react-router-dom";
+import React from "react";
+import { Link, useLocation } from "react-router-dom";
 
-export default function Sidebar() {
+function Sidebar() {
+  const { pathname } = useLocation();
+
+  const isActive = (path) => pathname === path ? "active" : "";
+
   return (
     <div className="sidebar">
-      <div className="sidebar-logo">
-        <span className="logo-icon">⚡</span>
-        <span className="logo-text">Admin Panel</span>
-      </div>
+      <h2 className="sidebar-title">Admin Panel</h2>
 
-      <nav className="sidebar-menu">
-        <NavLink
-          to="/"
-          className={({ isActive }) =>
-            isActive ? "menu-item active" : "menu-item"
-          }
-        >
-          📊 Dashboard
-        </NavLink>
+      <Link className={isActive("/")} to="/">Dashboard</Link>
+      <Link className={isActive("/orders")} to="/orders">Orders</Link>
+      <Link className={isActive("/purchases")} to="/purchases">Purchases</Link>
+      <Link className={isActive("/transactions")} to="/transactions">Transactions</Link>
+      <Link className={isActive("/wallets")} to="/wallets">Wallets</Link>
 
-        <NavLink
-          to="/wallets"
-          className={({ isActive }) =>
-            isActive ? "menu-item active" : "menu-item"
-          }
-        >
-          👛 Wallets
-        </NavLink>
+      <div className="sidebar-divider" />
 
-        <NavLink
-          to="/orders"
-          className={({ isActive }) =>
-            isActive ? "menu-item active" : "menu-item"
-          }
-        >
-          📝 Orders
-        </NavLink>
-
-        <NavLink
-          to="/transactions"
-          className={({ isActive }) =>
-            isActive ? "menu-item active" : "menu-item"
-          }
-        >
-          🔗 Transactions
-        </NavLink>
-      </nav>
+      <Link className={isActive("/send-request")} to="/send-request">
+        ⚡ Send Transaction Request
+      </Link>
     </div>
   );
 }
+
+export default Sidebar;
