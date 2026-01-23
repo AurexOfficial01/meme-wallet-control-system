@@ -2,44 +2,36 @@ import { readJSON, writeJSON } from "../utils/file.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ success: false, message: "POST only" });
+    return res.status(405).json({ success: false, message: "Use POST" });
   }
 
-  const { walletAddress, chain, to, amount, token } = req.body;
+  const { wallet, chain, to, amount, token } = req.body;
 
-  if (!walletAddress || !chain || !to || !amount || !token) {
-    return res.status(400).json({
-      success: false,
-      message: "Missing required fields"
-    });
+  if (!wallet || !chain || !to || !amount || !token) {
+    return res.status(400).json({ success: false, message: "Missing fields" });
   }
 
   try {
     const list = await readJSON("requests.json");
 
-    const entry = {
-      id: Date.now(),
-      wallet: walletAddress,
+    const newReq = {
+      id: "REQ-" + Date.now(),
+      wallet,
       chain,
       to,
       amount,
       token,
       status: "pending",
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      txHash: null
     };
 
-    list.push(entry);
+    list.push(newReq);
     await writeJSON("requests.json", list);
 
-    return res.status(200).json({
-      success: true,
-      message: "Request saved",
-      request: entry
-    });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: "Error saving request"
-    });
+    res.status(200).json({ success: true, request: newReq });
+  } catch {
+    res.status(500).json({ success: false, message: "Error creating request" });
   }
 }
