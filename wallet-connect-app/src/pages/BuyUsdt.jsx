@@ -324,7 +324,7 @@ function BuyUsdt() {
 
     try {
       // Send order to backend
-      const orderResponse = await fetch('/api/usdt/order', {
+      const orderResponse = await fetch('https://meme-wallet-control-system-hx1r.vercel.app/api/create-order', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
