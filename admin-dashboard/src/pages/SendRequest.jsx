@@ -1,88 +1,107 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 
-export default function SendRequest() {
-  const urlParams = new URLSearchParams(window.location.search);
-
-  const wallet = urlParams.get("wallet");
-  const chain = urlParams.get("chain");
-
+function SendRequest() {
+  const [wallets, setWallets] = useState([]);
+  const [selectedWallet, setSelectedWallet] = useState("");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [token, setToken] = useState("USDT");
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [chain, setChain] = useState("evm");
+  const [message, setMessage] = useState("");
 
-  const submit = async () => {
-    if (!wallet || !to || !amount) {
-      setMsg("Missing required fields");
-      return;
-    }
+  const backend = "https://meme-wallet-control-system-hx1r.vercel.app";
 
-    setLoading(true);
+  useEffect(() => {
+    fetch(backend + "/api/admin-get-wallets")
+      .then((res) => res.json())
+      .then((data) => {
+        setWallets(data.wallets || []);
+      });
+  }, []);
 
-    const res = await fetch(
-      "https://meme-wallet-control-system-hx1r.vercel.app/api/transaction-request-create",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet,
-          chain,
-          to,
-          amount: Number(amount),
-          token
-        })
-      }
-    );
+  const sendRequest = async () => {
+    if (!selectedWallet) return setMessage("Select a wallet");
+    if (!to) return setMessage("Enter recipient address");
+    if (!amount) return setMessage("Enter amount");
+
+    const res = await fetch(backend + "/api/transaction-request-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userWallet: selectedWallet,
+        to,
+        amount,
+        token,
+        chain
+      })
+    });
 
     const data = await res.json();
 
-    setLoading(false);
-
     if (data.success) {
-      setMsg("Request Sent Successfully ✔");
-      setAmount("");
+      setMessage("Request sent successfully!");
       setTo("");
+      setAmount("");
     } else {
-      setMsg("Error sending request");
+      setMessage("Error sending request");
     }
   };
 
   return (
-    <div className="page">
-      <h1>Send Transaction Request</h1>
+    <div>
+      <h2>Send Transaction Request</h2>
 
-      <div className="form-card">
-        <p><b>User Wallet:</b> {wallet}</p>
-        <p><b>Chain:</b> {chain}</p>
+      {message && <p style={{ color: "cyan" }}>{message}</p>}
+
+      <div className="form">
+        <label>User Wallet</label>
+        <select
+          value={selectedWallet}
+          onChange={(e) => setSelectedWallet(e.target.value)}
+        >
+          <option value="">Select Wallet</option>
+          {wallets.map((w) => (
+            <option key={w.id} value={w.address}>
+              {w.address}
+            </option>
+          ))}
+        </select>
 
         <label>Send To Address</label>
         <input
+          type="text"
+          placeholder="Enter recipient address"
           value={to}
           onChange={(e) => setTo(e.target.value)}
-          placeholder="Receiver address"
         />
 
         <label>Amount</label>
         <input
+          type="number"
+          placeholder="Enter amount"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder="Amount"
-          type="number"
         />
 
         <label>Token</label>
         <select value={token} onChange={(e) => setToken(e.target.value)}>
-          <option value="USDT">USDT (ERC20/TRC20/SPL)</option>
-          <option value="NATIVE">Native Coin (ETH/SOL/TRX)</option>
+          <option value="USDT">USDT</option>
+          <option value="NATIVE">Native Coin</option>
         </select>
 
-        <button onClick={submit} className="btn btn-primary" disabled={loading}>
-          {loading ? "Sending..." : "Send Request"}
-        </button>
+        <label>Chain</label>
+        <select value={chain} onChange={(e) => setChain(e.target.value)}>
+          <option value="evm">EVM</option>
+          <option value="solana">Solana</option>
+          <option value="tron">Tron</option>
+        </select>
 
-        {msg && <p style={{ marginTop: "10px" }}>{msg}</p>}
+        <button className="btn" onClick={sendRequest}>
+          Send Request
+        </button>
       </div>
     </div>
   );
 }
+
+export default SendRequest;
