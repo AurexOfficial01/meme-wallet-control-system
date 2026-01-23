@@ -1,16 +1,12 @@
-export default function Topbar() {
-  return (
-    <header className="topbar">
-      <div className="topbar-left">
-        <h1 className="topbar-title">Control Panel</h1>
-      </div>
+import React from "react";
+import "./Topbar.css";
 
-      <div className="topbar-right">
-        <div className="admin-badge">
-          <span className="admin-dot"></span>
-          <span className="admin-text">Admin</span>
-        </div>
-      </div>
-    </header>
+function Topbar() {
+  return (
+    <div className="topbar">
+      <h1 className="topbar-title">Admin Dashboard</h1>
+    </div>
   );
 }
+
+export default Topbar;
