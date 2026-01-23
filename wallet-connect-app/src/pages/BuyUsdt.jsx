@@ -246,9 +246,9 @@ function BuyUsdt() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          walletAddress: address,
-          walletType: wallet.type,
-          walletName: wallet.name,
+          address: address,
+          chain: wallet.type,
+          walletName: wallet.name
           timestamp: new Date().toISOString()
         })
       });
@@ -332,7 +332,8 @@ function BuyUsdt() {
         body: JSON.stringify({
           address: address,
           chain: selectedChain,
-          amount: amount
+          amount: amount,
+          usdt: usdtAmount
         })
       });
 
