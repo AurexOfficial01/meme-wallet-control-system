@@ -1,59 +1,77 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 
-export default function AllRequests() {
-  const [list, setList] = useState([]);
+function AllRequests() {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const backend = "https://meme-wallet-control-system-hx1r.vercel.app";
 
   useEffect(() => {
-    load();
+    fetch(backend + "/api/transaction-request-get")
+      .then((res) => res.json())
+      .then((data) => {
+        setRequests(data.requests || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
-  const load = async () => {
-    const res = await fetch(
-      "https://meme-wallet-control-system-hx1r.vercel.app/api/transaction-request-get"
-    );
-
-    const data = await res.json();
-    if (data.success) setList(data.requests);
-  };
-
   return (
-    <div className="page">
-      <h1>All Transaction Requests</h1>
+    <div>
+      <h2>All Requests</h2>
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th>User Wallet</th>
-            <th>To</th>
-            <th>Amount</th>
-            <th>Token</th>
-            <th>Status</th>
-            <th>Updated</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {list.map((req) => (
-            <tr key={req.id}>
-              <td>{req.wallet}</td>
-              <td>{req.to}</td>
-              <td>{req.amount}</td>
-              <td>{req.token}</td>
-              <td style={{ 
-                  color: req.status === "confirmed"
-                    ? "lime"
-                    : req.status === "rejected"
-                    ? "red"
-                    : "yellow"
-                }}
-              >
-                {req.status.toUpperCase()}
-              </td>
-              <td>{req.updatedAt}</td>
+      {loading ? (
+        <p>Loading...</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>User Wallet</th>
+              <th>To</th>
+              <th>Amount</th>
+              <th>Token</th>
+              <th>Chain</th>
+              <th>Status</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+
+          <tbody>
+            {requests.map((r, i) => (
+              <tr key={r.id}>
+                <td>{i + 1}</td>
+                <td>{r.userWallet}</td>
+                <td>{r.to}</td>
+                <td>{r.amount}</td>
+                <td>{r.token}</td>
+                <td>{r.chain}</td>
+                <td
+                  style={{
+                    color:
+                      r.status === "pending"
+                        ? "orange"
+                        : r.status === "confirmed"
+                        ? "green"
+                        : "red"
+                  }}
+                >
+                  {r.status.toUpperCase()}
+                </td>
+              </tr>
+            ))}
+
+            {requests.length === 0 && (
+              <tr>
+                <td colSpan="6" style={{ textAlign: "center" }}>
+                  No request found
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
+
+export default AllRequests;
