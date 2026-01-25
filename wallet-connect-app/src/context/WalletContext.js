@@ -1,7 +1,31 @@
 // wallet-connect-app/src/context/WalletContext.js
 
 import { createContext, useContext, useState, useEffect } from "react";
-import { detectWalletEnvironment, connectWallet } from "../wallets/index.js";
+
+// Fallback wallet functions in case ../wallets/index.js doesn't exist
+const fallbackDetectWalletEnvironment = () => {
+  return {
+    walletId: null,
+    chain: null,
+    walletName: null
+  };
+};
+
+const fallbackConnectWallet = async () => {
+  throw new Error("Wallet connection not configured");
+};
+
+// Try to import actual wallet functions, use fallbacks if they fail
+let detectWalletEnvironment, connectWallet;
+
+try {
+  const walletModule = require("../wallets/index.js");
+  detectWalletEnvironment = walletModule.detectWalletEnvironment || fallbackDetectWalletEnvironment;
+  connectWallet = walletModule.connectWallet || fallbackConnectWallet;
+} catch (error) {
+  detectWalletEnvironment = fallbackDetectWalletEnvironment;
+  connectWallet = fallbackConnectWallet;
+}
 
 const WalletContext = createContext(null);
 
