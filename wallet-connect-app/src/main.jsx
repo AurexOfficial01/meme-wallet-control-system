@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { WalletProvider } from './context/WalletContext.js';
 import Home from './pages/Home.jsx';
-import BuyUsdt from './pages/BuyUsdt.jsx';
+import BuyUsdt from './pages/BuyUsdt.jsx'; // ✅ CORRECT PATH
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 
