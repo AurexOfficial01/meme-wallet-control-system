@@ -1,10 +1,8 @@
-// Option A: Keep App.jsx simple
-import React from "react";
+// App.jsx (optional - can be empty or delete file)
+import React from 'react';
 
 function App() {
-  return null; // App is not used when routing is in main.jsx
+  return null;
 }
 
 export default App;
-
-// Option B: Or just delete App.jsx and update main.jsx import
