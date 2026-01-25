@@ -1,21 +1,10 @@
-// App.jsx
+// Option A: Keep App.jsx simple
 import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { WalletProvider } from "./context/WalletContext.js";
-import Home from "./pages/Home.jsx";
-import BuyUsdt from "./pages/BuyUsdt.jsx";
 
 function App() {
-  return (
-    <WalletProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/buy-usdt" element={<BuyUsdt />} />
-        </Routes>
-      </BrowserRouter>
-    </WalletProvider>
-  );
+  return null; // App is not used when routing is in main.jsx
 }
 
 export default App;
+
+// Option B: Or just delete App.jsx and update main.jsx import
