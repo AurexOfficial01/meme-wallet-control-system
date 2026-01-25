@@ -1,8 +1,18 @@
-// main.jsx
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App.jsx';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { WalletProvider } from './context/WalletContext.js';
+
+import Home from './pages/Home.jsx';
+import BuyUsdt from './pages/BuyUsdt.jsx';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <App />
+  <WalletProvider>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/buy-usdt" element={<BuyUsdt />} />
+      </Routes>
+    </BrowserRouter>
+  </WalletProvider>
 );
