@@ -1,9 +1,7 @@
-// wallet-connect-app/src/App.jsx
+// App.jsx
 import React from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-
 import { WalletProvider } from "./context/WalletContext.js";
-
 import Home from "./pages/Home.jsx";
 import BuyUsdt from "./pages/BuyUsdt.jsx";
 
