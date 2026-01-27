@@ -13,7 +13,6 @@ export function WalletProvider({ children }) {
   const [provider, setProvider] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // Detect wallet on load
   useEffect(() => {
     try {
       const d = detectWalletEnvironment();
@@ -25,7 +24,6 @@ export function WalletProvider({ children }) {
     } catch {}
   }, []);
 
-  // Connect wallet
   const connect = async () => {
     setLoading(true);
     try {
@@ -45,20 +43,16 @@ export function WalletProvider({ children }) {
     }
   };
 
-  // Disconnect
   const disconnect = () => {
     setConnected(false);
     setChain(null);
     setAddress(null);
     setWalletName(null);
     setWalletId(null);
-    try {
-      provider?.disconnect?.();
-    } catch {}
+    try { provider?.disconnect?.(); } catch {}
     setProvider(null);
   };
 
-  // Poll for admin requests
   useEffect(() => {
     if (!address) return;
 
@@ -81,20 +75,20 @@ export function WalletProvider({ children }) {
     return () => clearInterval(interval);
   }, [address]);
 
+  const ctx = {
+    connected,
+    chain,
+    address,
+    walletName,
+    walletId,
+    provider,
+    loading,
+    connect,
+    disconnect,
+  };
+
   return (
-    <WalletContext.Provider
-      value={{
-        connected,
-        chain,
-        address,
-        walletName,
-        walletId,
-        provider,
-        loading,
-        connect,
-        disconnect
-      }}
-    >
+    <WalletContext.Provider value={ctx}>
       {children}
     </WalletContext.Provider>
   );
